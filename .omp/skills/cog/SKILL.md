@@ -172,6 +172,16 @@ cog assert cog --kind correction --claim "Added resolve_assertion_id for short I
 - **All read commands filter retracted by default**. `query`, `impact`, and `trace` only show active assertions. This keeps output clean for working state.
 - **`verify` is a confidence check, not a substitute for reading code**. It tells you the model is structurally consistent (no orphan entities, no bare assertions, no dangling deps). Run it after bulk changes to the model.
 - **All display uses short IDs**. Verify details, impact reports, trace output — everything uses 8-char IDs. Full UUIDs only appear in `assert` output for reference.
+- **`verify` detects stale entities**. An entity with zero active assertions and zero relations is flagged as isolated. Clean up test artifacts before committing your model.
+- **Grounds should point to current code**. When you refactor, update the grounds of affected assertions. Stale line references erode trust in the model.
+
+## Modeling Anti-Patterns
+
+These patterns produce a fragile or noisy model:
+- Asserting on the wrong entity (e.g. store behavior asserted on types)
+- Creating test assertions and forgetting to retract them
+- Using `fragility` as a permanent warning instead of retracting after fix
+- Recording what code does (that's the code's job) instead of why it does it or what could break
 
 ## Database Location
 
