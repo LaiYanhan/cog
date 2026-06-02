@@ -122,7 +122,7 @@ impl ImpactResult {
             }
 
             entity_ids.push(current.clone());
-            for next in store.get_downstream_entities(&current)? {
+            for next in store.get_impact_neighbors(&current)? {
                 queue.push_back(next.id);
             }
         }

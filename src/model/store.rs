@@ -663,25 +663,33 @@ impl Store {
         Ok(related)
     }
 
-    pub fn get_downstream_entities(&self, entity_id: &str) -> Result<Vec<Entity>> {
+    pub fn get_impact_neighbors(&self, entity_id: &str) -> Result<Vec<Entity>> {
+        // For contains: forward — children are impacted when parent changes
+        // For uses/calls: reverse — dependents are impacted when dependency changes
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT e.id, e.qualified_name, e.kind, e.created_at
                  FROM entity_relations r
-                 JOIN entities e ON e.id = r.to_entity
-                 WHERE r.from_entity = ?1
+                 JOIN entities e ON e.id = CASE
+                     WHEN r.kind = 'contains' THEN r.to_entity
+                     ELSE r.from_entity
+                 END
+                 WHERE CASE
+                     WHEN r.kind = 'contains' THEN r.from_entity = ?1
+                     ELSE r.to_entity = ?1
+                 END
                  ORDER BY e.qualified_name",
             )
-            .context("failed to prepare get_downstream_entities statement")?;
+            .context("failed to prepare get_impact_neighbors statement")?;
         let mut rows = stmt
             .query(params![entity_id])
-            .context("failed to query downstream entities")?;
+            .context("failed to query impact neighbors")?;
 
         let mut entities = Vec::new();
         while let Some(row) = rows
             .next()
-            .context("failed to iterate downstream entities")?
+            .context("failed to iterate impact neighbors")?
         {
             entities.push(map_entity_row(
                 row.get(0)?,
