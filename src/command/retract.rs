@@ -5,7 +5,8 @@ use crate::format;
 use crate::model::{CascadeResult, Store};
 
 pub fn execute(store: &Store, id: &str, reason: &str) -> Result<CommandOutput> {
-    let result = CascadeResult::retract(store, id, reason)?;
+    let resolved = store.resolve_assertion_id(id)?;
+    let result = CascadeResult::retract(store, &resolved, reason)?;
     Ok(CommandOutput::success(format::cascade_report(&result)))
 }
 

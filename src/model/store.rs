@@ -271,6 +271,32 @@ impl Store {
         }
     }
 
+    pub fn resolve_assertion_id(&self, id: &str) -> Result<String> {
+        // Try exact match first (full UUID)
+        if let Some(assertion) = self.get_assertion(id)? {
+            return Ok(assertion.id);
+        }
+        // Fallback: prefix match for short IDs
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id FROM assertions WHERE id LIKE ?1 || '%' ORDER BY created_at",
+            )
+            .context("failed to prepare resolve_assertion_id statement")?;
+        let mut rows = stmt
+            .query(params![id])
+            .context("failed to query assertion by prefix")?;
+        let mut matches = Vec::new();
+        while let Some(row) = rows.next().context("failed to iterate prefix matches")? {
+            matches.push(row.get::<_, String>(0)?);
+        }
+        match matches.len() {
+            0 => bail!("assertion not found: {id}"),
+            1 => Ok(matches.into_iter().next().unwrap()),
+            _ => bail!("ambiguous short id '{}', matches {} assertions", id, matches.len()),
+        }
+    }
+
     pub fn get_assertions_for_entity(&self, entity_id: &str) -> Result<Vec<Assertion>> {
         let mut stmt = self
             .conn
