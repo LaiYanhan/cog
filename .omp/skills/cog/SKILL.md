@@ -1,6 +1,6 @@
 ---
 name: cog
-description: "Cognitive model CLI for LLM coding agents. Use when the agent needs to record, query, or reason about codebase knowledge: contracts, invariants, dependencies, fragility points. Activated by: cog assert/retract/query/impact/trace/depend/verify/export/stats/index commands."
+description: "Cognitive model CLI for LLM coding agents. Use when the agent needs to record, query, or reason about codebase knowledge: contracts, invariants, dependencies, fragility points. Activated by: cog assert/retract/query/impact/trace/depend/verify/export/stats/index/delete-entity/branch commands."
 ---
 
 # cog — Cognitive Model for Coding Agents
@@ -48,6 +48,13 @@ cog depend <entity_a> --on <entity_b> --kind contains|calls|uses
 cog retract <id> --reason "<why>"
 ```
 
+**Delete an entity and all its data (cascading):**
+```bash
+cog delete-entity <qualified_name>
+# Removes: entity, all assertions + evidence, relations, changelog entries
+# Fails if entity does not exist (exit code 1)
+```
+
 ### Reading from the model
 **Show active assertions for an entity (default filters out retracted):**
 ```bash
@@ -67,15 +74,15 @@ cog trace <entity>
 ```bash
 cog index
 # Output: - entity_name [N] where N = active assertion count
-```
 **Model statistics:**
 ```bash
 cog stats
 ```
 **Structural consistency checks (3 dimensions):**
 ```bash
-cog verify [--scope <entity>]
+cog verify [--scope <entity>] [--clean]
 # Checks: isolated entities, missing evidence, dangling dependencies (retracted/uncertain)
+# --clean: auto-delete isolated entities found during check
 ```
 **Export model (json/toml/dot):**
 ```bash
@@ -110,6 +117,57 @@ cog export [--format json|toml|dot]
 - **`uses`/`calls`**: reverse — dependency change impacts dependents (`graph uses store` → `impact store` finds `graph`)
 
 When recording relations, think: "if X changes, what does Y mean for impact?" Then set direction accordingly.
+
+### Latent space reasoning (branching)
+
+```
+cog branch create [--name <name>]   # Snapshot current model (name auto-generated if omitted)
+cog branch list                      # List all branches (excludes _main_backup)
+cog branch switch <name>             # Activate branch for editing
+cog branch switch _main              # Return to main (saves branch state, clears active marker)
+cog branch diff <name>               # Diff main vs branch changes (items ordered by ID, stable)
+cog branch diff <name> --item <N>    # Inspect specific change in detail
+cog branch merge <name>              # Show merge plan (pending items)
+cog branch merge <name> --apply-all  # Apply all changes to main
+cog branch merge <name> --apply <N>  # Apply one change
+cog branch merge <name> --reject <N> # Reject one change
+cog branch drop <name>               # Delete branch file
+```
+
+**Workflow**:
+```
+# 1. Snapshot current model
+cog branch create --name my-plan
+
+# 2. Switch to the sandbox (all subsequent commands affect only the copy)
+cog branch switch my-plan
+
+# 3. Freely experiment — assert/retract/depend without risk
+cog assert new::feature --kind intent --claim "planned feature" --grounds "plan:design-doc"
+cog retract d6e3a49f --reason "outdated assumption"
+
+# 4. Return to main, diff to see what changed, then merge
+cog branch switch _main
+cog branch diff my-plan
+cog branch merge my-plan --apply-all
+
+# 5. Clean up
+cog branch drop my-plan
+```
+
+**Diff semantics**: compares main (base) vs branch file. Each addition/removal/modification is an indexed item. Items within each category are sorted by ID — indexing is stable across processes, so `--item <N>` produces consistent results.
+
+**Merge semantics**: applies changes from branch to main:
+- **Entities**: inserted with original UUID — cross-references stay valid
+- **Assertions**: inserted with original UUID; evidence and dependency relations are preserved
+- **Removals**: entity removals skipped (avoids broken references); assertion removals become retractions
+- **Evidence/relations**: verified against existing IDs; skipped items are reported in merge summary
+- **Merge reports**: `applied N, skipped M` — check for unexpected skips
+
+**Reserved branch names**: `_main` (switch back target) and `_main_backup` (internal) cannot be created as branches.
+
+**Use case**: Before writing code, create a branch, assert planned invariants and contracts, diff against the real model, then merge only validated knowledge. Keeps the cognitive model clean while allowing speculative reasoning.
+---
 
 ## Typical Workflows
 
@@ -172,16 +230,22 @@ cog assert cog --kind correction --claim "Added resolve_assertion_id for short I
 - **All read commands filter retracted by default**. `query`, `impact`, and `trace` only show active assertions. This keeps output clean for working state.
 - **`verify` is a confidence check, not a substitute for reading code**. It tells you the model is structurally consistent (no orphan entities, no bare assertions, no dangling deps). Run it after bulk changes to the model.
 - **All display uses short IDs**. Verify details, impact reports, trace output — everything uses 8-char IDs. Full UUIDs only appear in `assert` output for reference.
+- **`verify --clean` removes isolated entities automatically**. Use this after test runs to clean up artifacts without manual `delete-entity` calls.
+- **`delete-entity` removes the entity and ALL its data** — assertions, evidence, relations, changelog. Undo is not possible. The command reports the counts of removed data before deleting.
 - **`verify` detects stale entities**. An entity with zero active assertions and zero relations is flagged as isolated. Clean up test artifacts before committing your model.
 - **Grounds should point to current code**. When you refactor, update the grounds of affected assertions. Stale line references erode trust in the model.
+- **Branch diffs are stable across processes**. Items within each category are sorted by ID, so `--item <N>` produces consistent results across separate invocations.
+- **Branch merge preserves UUIDs**. Assertion and evidence IDs are kept identical to the branch copy. This means cross-references (dependencies, assertion relations) remain valid after merge.
+- **Check merge reports for skips**. When merging, `applied N, skipped M` tells you if any evidence or relation items couldn't be matched (usually because the referenced assertion wasn't found). A non-zero skip count needs investigation.
 
 ## Modeling Anti-Patterns
 
 These patterns produce a fragile or noisy model:
 - Asserting on the wrong entity (e.g. store behavior asserted on types)
-- Creating test assertions and forgetting to retract them
+- Creating test assertions and forgetting to retract them; use `verify --clean` or `delete-entity` to remove stale test entities
 - Using `fragility` as a permanent warning instead of retracting after fix
 - Recording what code does (that's the code's job) instead of why it does it or what could break
+- Leaving test entities in the model after experimentation — run `verify [--clean]` as part of your closeout checklist
 
 ## Database Location
 
