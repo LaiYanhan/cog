@@ -5,16 +5,24 @@ use crate::model::{
     RelatedEntity, RelationDirection, TraceAssertion, TraceResult,
 };
 
+pub fn short_id(id: &str) -> &str {
+    if id.len() >= 8 {
+        &id[..8]
+    } else {
+        id
+    }
+}
+
 pub fn entity_brief(entity: &Entity) -> String {
     format!("{} [{}]", entity.qualified_name, entity.kind)
 }
 
-pub fn assertion_detail(assertion: &Assertion, evidences: &[Evidence]) -> String {
+pub fn assertion_detail(assertion: &Assertion, entity_name: &str, evidences: &[Evidence]) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "- {} [{}|{}] {}",
-        assertion.id, assertion.kind, assertion.status, assertion.claim
+        "- {} [{}] {}|{}: {}",
+        short_id(&assertion.id), entity_name, assertion.kind, assertion.status, assertion.claim
     );
 
     if evidences.is_empty() {
@@ -31,7 +39,7 @@ pub fn assertion_detail(assertion: &Assertion, evidences: &[Evidence]) -> String
 pub fn assertion_oneline(assertion: &Assertion) -> String {
     format!(
         "{} [{}|{}] {}",
-        assertion.id, assertion.kind, assertion.status, assertion.claim
+        short_id(&assertion.id), assertion.kind, assertion.status, assertion.claim
     )
 }
 
@@ -48,7 +56,7 @@ pub fn query_report(
         out.push_str("(none)\n");
     } else {
         for (assertion, evidences) in assertions {
-            out.push_str(&assertion_detail(assertion, evidences));
+            out.push_str(&assertion_detail(assertion, &entity.qualified_name, evidences));
         }
     }
 
@@ -74,7 +82,12 @@ pub fn query_report(
 
 pub fn cascade_report(result: &CascadeResult) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "retracted: {}", result.retracted.id);
+    let _ = writeln!(
+        out,
+        "retracted: {} {}",
+        short_id(&result.retracted.id),
+        result.retracted.claim
+    );
     if let Some(reason) = &result.retracted.retraction_reason {
         let _ = writeln!(out, "reason: {reason}");
     }
@@ -88,7 +101,13 @@ pub fn cascade_report(result: &CascadeResult) -> String {
                 CascadeReason::MarkedUncertain => "marked_uncertain",
                 CascadeReason::GroundWeakened => "ground_weakened",
             };
-            let _ = writeln!(out, "- {} ({})", affected.assertion.id, reason);
+            let _ = writeln!(
+                out,
+                "- {} [{}] {}",
+                short_id(&affected.assertion.id),
+                reason,
+                affected.assertion.claim
+            );
         }
     }
 
@@ -140,7 +159,7 @@ fn write_trace_assertion(out: &mut String, node: &TraceAssertion, depth: usize) 
     let _ = writeln!(
         out,
         "{indent}- {} [{}|{}] {}",
-        node.assertion.id, node.assertion.kind, node.assertion.status, node.assertion.claim
+        short_id(&node.assertion.id), node.assertion.kind, node.assertion.status, node.assertion.claim
     );
     if node.evidences.is_empty() {
         let _ = writeln!(out, "{indent}  evidence: (none)");

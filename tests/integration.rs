@@ -28,11 +28,19 @@ fn run_ok(db: &Path, args: &[&str]) -> String {
 }
 
 fn parse_assertion_id(output: &str) -> String {
-    output
+    let raw = output
         .lines()
         .find_map(|line| line.strip_prefix("- id: "))
-        .map(ToOwned::to_owned)
-        .expect("assert output should contain assertion id")
+        .expect("assert output should contain assertion id");
+    // format: "short_id (full_uuid)" — extract the full uuid
+    if let Some(start) = raw.find('(') {
+        if let Some(end) = raw.find(')') {
+            if end > start {
+                return raw[start + 1..end].to_owned();
+            }
+        }
+    }
+    raw.to_owned()
 }
 
 #[test]

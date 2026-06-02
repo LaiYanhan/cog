@@ -32,7 +32,7 @@ pub fn execute(
 
     let mut out = String::new();
     out.push_str("assertion created\n");
-    out.push_str(&format!("- id: {}\n", assertion.id));
+    out.push_str(&format!("- id: {} ({})\n", crate::format::short_id(&assertion.id), assertion.id));
     out.push_str(&format!("- entity: {}\n", entity_record.qualified_name));
     out.push_str(&format!("- kind: {}\n", assertion.kind));
     out.push_str(&format!("- claim: {}\n", assertion.claim));
