@@ -2,15 +2,16 @@ use anyhow::{Result, anyhow};
 
 use crate::command::CommandOutput;
 use crate::format;
-use crate::model::Store;
+use crate::model::{AssertionStatus, Store};
 
-pub fn execute(store: &Store, entity: &str) -> Result<CommandOutput> {
+pub fn execute(store: &Store, entity: &str, all: bool) -> Result<CommandOutput> {
     let entity_record = store
         .get_entity_by_name(entity)?
         .ok_or_else(|| anyhow!("entity not found: {entity}"))?;
     let assertions = store.get_assertions_for_entity(&entity_record.id)?;
     let assertions_with_evidence = assertions
         .into_iter()
+        .filter(|a| all || a.status == AssertionStatus::Active)
         .map(|assertion| {
             let evidences = store.get_evidence_for_assertion(&assertion.id)?;
             Ok((assertion, evidences))
@@ -49,7 +50,7 @@ mod tests {
             None,
         )?;
 
-        let output = execute(&store, "auth::login")?;
+        let output = execute(&store, "auth::login", false)?;
         assert_eq!(output.exit_code, 0);
         assert!(output.text.contains("entity: auth::login"));
         assert!(output.text.contains("returns option token"));

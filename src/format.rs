@@ -191,14 +191,14 @@ pub fn stats_report(stats: &ModelStats) -> String {
     )
 }
 
-pub fn entity_index(entities: &[Entity]) -> String {
+pub fn entity_index_with_counts(entities: &[(Entity, usize)]) -> String {
     if entities.is_empty() {
         return "(no entities)".to_string();
     }
 
     let mut out = String::new();
-    for entity in entities {
-        let _ = writeln!(out, "- {}", entity_brief(entity));
+    for (entity, count) in entities {
+        let _ = writeln!(out, "- {} [{}]", entity.qualified_name, count);
     }
     out
 }

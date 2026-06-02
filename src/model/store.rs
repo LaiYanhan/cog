@@ -205,6 +205,35 @@ impl Store {
         Ok(entities)
     }
 
+    pub fn list_entities_with_counts(&self) -> Result<Vec<(Entity, usize)>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT e.id, e.qualified_name, e.kind, e.created_at, \
+                 COUNT(a.id) AS assertion_count \
+                 FROM entities e \
+                 LEFT JOIN assertions a ON a.entity_id = e.id AND a.status = 'active' \
+                 GROUP BY e.id \
+                 ORDER BY assertion_count DESC, e.qualified_name",
+            )
+            .context("failed to prepare list_entities_with_counts statement")?;
+
+        let mut rows = stmt.query([]).context("failed to query entities with counts")?;
+        let mut result = Vec::new();
+        while let Some(row) = rows.next().context("failed to iterate entities with counts")? {
+            let entity = map_entity_row(
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+            )?;
+            let count: usize = row.get::<_, i64>(4)? as usize;
+            result.push((entity, count));
+        }
+
+        Ok(result)
+    }
+
     pub fn create_assertion(
         &self,
         entity_id: &str,

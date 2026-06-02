@@ -5,8 +5,8 @@ use crate::format;
 use crate::model::Store;
 
 pub fn execute(store: &Store) -> Result<CommandOutput> {
-    let entities = store.list_entities()?;
-    Ok(CommandOutput::success(format::entity_index(&entities)))
+    let entities = store.list_entities_with_counts()?;
+    Ok(CommandOutput::success(format::entity_index_with_counts(&entities)))
 }
 
 #[cfg(test)]

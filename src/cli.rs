@@ -20,6 +20,8 @@ pub struct Cli {
 pub enum Commands {
     Query {
         entity: String,
+        #[arg(long)]
+        all: bool,
     },
     Impact {
         entity: String,
@@ -72,7 +74,7 @@ impl Cli {
 
     pub fn run(&self, store: &Store) -> Result<CommandOutput> {
         match &self.command {
-            Commands::Query { entity } => command::query::execute(store, entity),
+            Commands::Query { entity, all } => command::query::execute(store, entity, *all),
             Commands::Impact { entity } => command::impact::execute(store, entity),
             Commands::Trace { entity } => command::trace::execute(store, entity),
             Commands::Index => command::index_cmd::execute(store),
