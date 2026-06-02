@@ -58,9 +58,10 @@ cog query <entity> --all  # include retracted
 ```bash
 cog impact <entity>
 ```
-**Why does this entity exist? (full dependency chain):**
+**Why does this entity exist? (full dependency chain + entity relations):**
 ```bash
 cog trace <entity>
+# Shows: assertions with evidence, entity relation graph (out/in)
 ```
 **List all entities with active assertion counts (sorted by importance):**
 ```bash
@@ -166,6 +167,9 @@ cog assert cog --kind correction --claim "Added resolve_assertion_id for short I
 - **Record cross-cutting invariants on the parent entity**. If a rule applies to multiple modules (e.g. "all IDs resolve via prefix match"), assert it on the root entity (`cog`) not on each leaf.
 - **`impact` combines both directions**. It shows assertions from the entity AND all reachable neighbors. Use it before refactoring to understand blast radius.
 - **Retract fragility assertions after fixing**. Once you fix the issue, retract the fragility with reason="fixed: ...". Don't leave stale warnings in the model.
+- **`trace` is the full picture**. It shows assertions (active-only), their evidence, the depends-on tree, and entity relations. Use it when you need to deeply understand one entity.
+- **All read commands filter retracted by default**. `query`, `impact`, and `trace` only show active assertions. This keeps output clean for working state.
+
 ## Database Location
 
 Default: `.cog/cog.db` in current directory. Override with `--db <path>` or `COG_DB` env var.
