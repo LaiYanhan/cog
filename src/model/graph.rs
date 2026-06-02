@@ -3,7 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use anyhow::{Result, anyhow, bail};
 
 use crate::model::{
-    Assertion, AssertionStatus, Changelog, ChangelogAction, Entity, Evidence, Store,
+    Assertion, AssertionStatus, Changelog, ChangelogAction, Entity, Evidence, RelatedEntity, Store,
 };
 
 #[derive(Debug, Clone)]
@@ -136,7 +136,10 @@ impl ImpactResult {
             .flatten()
             .collect::<Vec<_>>();
 
-        let affected_assertions = store.get_assertions_for_entities(&entity_ids)?;
+        let affected_assertions = store.get_assertions_for_entities(&entity_ids)?
+            .into_iter()
+            .filter(|a| a.status == AssertionStatus::Active)
+            .collect();
 
         Ok(Self {
             entity,
@@ -150,6 +153,7 @@ impl ImpactResult {
 pub struct TraceResult {
     pub entity: Entity,
     pub assertions: Vec<TraceAssertion>,
+    pub related_entities: Vec<RelatedEntity>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,10 +172,13 @@ impl TraceResult {
         let assertions = store
             .get_assertions_for_entity(&entity.id)?
             .into_iter()
+            .filter(|a| a.status == AssertionStatus::Active)
             .map(|assertion| build_trace_assertion(store, assertion, &mut HashSet::new()))
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(Self { entity, assertions })
+        let related_entities = store.get_related_entities(&entity.id)?;
+
+        Ok(Self { entity, assertions, related_entities })
     }
 }
 

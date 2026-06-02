@@ -143,14 +143,31 @@ pub fn trace_report(result: &TraceResult) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "trace_entity: {}", result.entity.qualified_name);
     if result.assertions.is_empty() {
-        out.push_str("assertions: (none)");
-        return out;
+        out.push_str("assertions: (none)\n");
+    } else {
+        out.push_str("assertions:\n");
+        for assertion in &result.assertions {
+            write_trace_assertion(&mut out, assertion, 0);
+        }
     }
 
-    out.push_str("assertions:\n");
-    for assertion in &result.assertions {
-        write_trace_assertion(&mut out, assertion, 0);
+    if !result.related_entities.is_empty() {
+        out.push_str("entity_relations:\n");
+        for rel in &result.related_entities {
+            let arrow = match rel.direction {
+                RelationDirection::Outgoing => "-->",
+                RelationDirection::Incoming => "<--",
+            };
+            let _ = writeln!(out, "- ({}) {} {} {} [{}]", 
+                match rel.direction { RelationDirection::Outgoing => "out", RelationDirection::Incoming => "in" },
+                result.entity.qualified_name,
+                arrow,
+                rel.entity.qualified_name,
+                rel.kind,
+            );
+        }
     }
+
     out
 }
 
