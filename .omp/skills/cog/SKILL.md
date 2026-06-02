@@ -102,6 +102,13 @@ cog export [--format json|toml|dot]
 
 **Do NOT use** `depends_on` for entity relations — that is an assertion-level concept (`--depends-on`).
 
+### Impact traversal direction
+`cog impact` traverses entity relations respecting their semantics:
+- **`contains`**: forward — parent change impacts children (`cog::model` contains `cog::model::store`)
+- **`uses`/`calls`**: reverse — dependency change impacts dependents (`graph uses store` → `impact store` finds `graph`)
+
+When recording relations, think: "if X changes, what does Y mean for impact?" Then set direction accordingly.
+
 ## Typical Workflows
 
 ### After reading unfamiliar code
@@ -157,6 +164,8 @@ cog assert cog --kind correction --claim "Added resolve_assertion_id for short I
 - **`index` is your first stop**. The assertion count tells you which entities the model knows most about. High-count entities are architectural anchors.
 - **Link assertions with `--depends-on`**. Individual assertions are facts; `--depends-on` chains are reasoning. Without dependency chains, `trace` has nothing to traverse.
 - **Record cross-cutting invariants on the parent entity**. If a rule applies to multiple modules (e.g. "all IDs resolve via prefix match"), assert it on the root entity (`cog`) not on each leaf.
+- **`impact` combines both directions**. It shows assertions from the entity AND all reachable neighbors. Use it before refactoring to understand blast radius.
+- **Retract fragility assertions after fixing**. Once you fix the issue, retract the fragility with reason="fixed: ...". Don't leave stale warnings in the model.
 ## Database Location
 
 Default: `.cog/cog.db` in current directory. Override with `--db <path>` or `COG_DB` env var.
