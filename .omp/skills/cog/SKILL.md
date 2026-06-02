@@ -72,9 +72,10 @@ cog index
 ```bash
 cog stats
 ```
-**Structural consistency checks:**
+**Structural consistency checks (3 dimensions):**
 ```bash
 cog verify [--scope <entity>]
+# Checks: isolated entities, missing evidence, dangling dependencies (retracted/uncertain)
 ```
 **Export model (json/toml/dot):**
 ```bash
@@ -169,6 +170,8 @@ cog assert cog --kind correction --claim "Added resolve_assertion_id for short I
 - **Retract fragility assertions after fixing**. Once you fix the issue, retract the fragility with reason="fixed: ...". Don't leave stale warnings in the model.
 - **`trace` is the full picture**. It shows assertions (active-only), their evidence, the depends-on tree, and entity relations. Use it when you need to deeply understand one entity.
 - **All read commands filter retracted by default**. `query`, `impact`, and `trace` only show active assertions. This keeps output clean for working state.
+- **`verify` is a confidence check, not a substitute for reading code**. It tells you the model is structurally consistent (no orphan entities, no bare assertions, no dangling deps). Run it after bulk changes to the model.
+- **All display uses short IDs**. Verify details, impact reports, trace output — everything uses 8-char IDs. Full UUIDs only appear in `assert` output for reference.
 
 ## Database Location
 
