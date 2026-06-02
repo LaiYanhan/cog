@@ -1,28 +1,31 @@
 use std::fmt::Write;
 
 use crate::model::{
-    Assertion, CascadeReason, CascadeResult, Entity, Evidence, ImpactResult, ModelStats,
-    RelatedEntity, RelationDirection, TraceAssertion, TraceResult,
+    Assertion, CascadeReason, CascadeResult, DiffItem, DiffSummary, Entity, Evidence, ImpactResult,
+    ModelDiff, ModelStats, RelatedEntity, RelationDirection, TraceAssertion, TraceResult,
 };
-
 pub fn short_id(id: &str) -> &str {
-    if id.len() >= 8 {
-        &id[..8]
-    } else {
-        id
-    }
+    if id.len() >= 8 { &id[..8] } else { id }
 }
 
 pub fn entity_brief(entity: &Entity) -> String {
     format!("{} [{}]", entity.qualified_name, entity.kind)
 }
 
-pub fn assertion_detail(assertion: &Assertion, entity_name: &str, evidences: &[Evidence]) -> String {
+pub fn assertion_detail(
+    assertion: &Assertion,
+    entity_name: &str,
+    evidences: &[Evidence],
+) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
         "- {} [{}] {}|{}: {}",
-        short_id(&assertion.id), entity_name, assertion.kind, assertion.status, assertion.claim
+        short_id(&assertion.id),
+        entity_name,
+        assertion.kind,
+        assertion.status,
+        assertion.claim
     );
 
     if evidences.is_empty() {
@@ -39,7 +42,10 @@ pub fn assertion_detail(assertion: &Assertion, entity_name: &str, evidences: &[E
 pub fn assertion_oneline(assertion: &Assertion) -> String {
     format!(
         "{} [{}|{}] {}",
-        short_id(&assertion.id), assertion.kind, assertion.status, assertion.claim
+        short_id(&assertion.id),
+        assertion.kind,
+        assertion.status,
+        assertion.claim
     )
 }
 
@@ -56,7 +62,11 @@ pub fn query_report(
         out.push_str("(none)\n");
     } else {
         for (assertion, evidences) in assertions {
-            out.push_str(&assertion_detail(assertion, &entity.qualified_name, evidences));
+            out.push_str(&assertion_detail(
+                assertion,
+                &entity.qualified_name,
+                evidences,
+            ));
         }
     }
 
@@ -158,8 +168,13 @@ pub fn trace_report(result: &TraceResult) -> String {
                 RelationDirection::Outgoing => "-->",
                 RelationDirection::Incoming => "<--",
             };
-            let _ = writeln!(out, "- ({}) {} {} {} [{}]", 
-                match rel.direction { RelationDirection::Outgoing => "out", RelationDirection::Incoming => "in" },
+            let _ = writeln!(
+                out,
+                "- ({}) {} {} {} [{}]",
+                match rel.direction {
+                    RelationDirection::Outgoing => "out",
+                    RelationDirection::Incoming => "in",
+                },
                 result.entity.qualified_name,
                 arrow,
                 rel.entity.qualified_name,
@@ -176,7 +191,10 @@ fn write_trace_assertion(out: &mut String, node: &TraceAssertion, depth: usize) 
     let _ = writeln!(
         out,
         "{indent}- {} [{}|{}] {}",
-        short_id(&node.assertion.id), node.assertion.kind, node.assertion.status, node.assertion.claim
+        short_id(&node.assertion.id),
+        node.assertion.kind,
+        node.assertion.status,
+        node.assertion.claim
     );
     if node.evidences.is_empty() {
         let _ = writeln!(out, "{indent}  evidence: (none)");
@@ -216,6 +234,193 @@ pub fn entity_index_with_counts(entities: &[(Entity, usize)]) -> String {
     let mut out = String::new();
     for (entity, count) in entities {
         let _ = writeln!(out, "- {} [{}]", entity.qualified_name, count);
+    }
+    out
+}
+
+pub fn diff_summary(summary: &DiffSummary) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "diff: {} change(s)", summary.total);
+    if summary.entities_added > 0 {
+        let _ = writeln!(out, "  entities: +{}", summary.entities_added);
+    }
+    if summary.entities_removed > 0 {
+        let _ = writeln!(out, "  entities: -{}", summary.entities_removed);
+    }
+    if summary.assertions_added > 0 {
+        let _ = writeln!(out, "  assertions: +{}", summary.assertions_added);
+    }
+    if summary.assertions_removed > 0 {
+        let _ = writeln!(out, "  assertions: -{}", summary.assertions_removed);
+    }
+    if summary.assertions_changed > 0 {
+        let _ = writeln!(out, "  assertions: ~{}", summary.assertions_changed);
+    }
+    if summary.evidences_added > 0 {
+        let _ = writeln!(out, "  evidences: +{}", summary.evidences_added);
+    }
+    if summary.evidences_removed > 0 {
+        let _ = writeln!(out, "  evidences: -{}", summary.evidences_removed);
+    }
+    if summary.entity_relations_added > 0 {
+        let _ = writeln!(
+            out,
+            "  entity_relations: +{}",
+            summary.entity_relations_added
+        );
+    }
+    if summary.entity_relations_removed > 0 {
+        let _ = writeln!(
+            out,
+            "  entity_relations: -{}",
+            summary.entity_relations_removed
+        );
+    }
+    if summary.assertion_relations_added > 0 {
+        let _ = writeln!(
+            out,
+            "  assertion_relations: +{}",
+            summary.assertion_relations_added
+        );
+    }
+    if summary.assertion_relations_removed > 0 {
+        let _ = writeln!(
+            out,
+            "  assertion_relations: -{}",
+            summary.assertion_relations_removed
+        );
+    }
+    out
+}
+
+pub fn diff_item_detail(index: usize, item: &DiffItem) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "[{}] {}", index, item_label(item));
+
+    match item {
+        DiffItem::EntityAdded(e) | DiffItem::EntityRemoved(e) => {
+            let _ = writeln!(out, "  id: {}", short_id(&e.id));
+            let _ = writeln!(out, "  name: {}", e.qualified_name);
+            let _ = writeln!(out, "  kind: {}", e.kind);
+        }
+        DiffItem::AssertionAdded(a) | DiffItem::AssertionRemoved(a) => {
+            let _ = writeln!(out, "  id: {}", short_id(&a.id));
+            let _ = writeln!(out, "  kind: {}", a.kind);
+            let _ = writeln!(out, "  status: {}", a.status);
+            let _ = writeln!(out, "  claim: {}", a.claim);
+        }
+        DiffItem::AssertionChanged(change) => {
+            let _ = writeln!(out, "  id: {}", short_id(&change.before.id));
+            let _ = writeln!(out, "  fields: {}", change.changed_fields.join(", "));
+            let _ = writeln!(out, "  before:");
+            let _ = writeln!(out, "    kind: {}", change.before.kind);
+            let _ = writeln!(out, "    status: {}", change.before.status);
+            let _ = writeln!(out, "    claim: {}", change.before.claim);
+            let _ = writeln!(out, "  after:");
+            let _ = writeln!(out, "    kind: {}", change.after.kind);
+            let _ = writeln!(out, "    status: {}", change.after.status);
+            let _ = writeln!(out, "    claim: {}", change.after.claim);
+        }
+        DiffItem::EvidenceAdded(e) | DiffItem::EvidenceRemoved(e) => {
+            let _ = writeln!(out, "  id: {}", short_id(&e.id));
+            let _ = writeln!(out, "  source: {}", e.source);
+            let _ = writeln!(out, "  detail: {}", e.detail);
+        }
+        DiffItem::EntityRelationAdded(r) | DiffItem::EntityRelationRemoved(r) => {
+            let _ = writeln!(out, "  id: {}", short_id(&r.id));
+            let _ = writeln!(out, "  from: {}", short_id(&r.from_entity));
+            let _ = writeln!(out, "  to: {}", short_id(&r.to_entity));
+            let _ = writeln!(out, "  kind: {}", r.kind);
+        }
+        DiffItem::AssertionRelationAdded(r) | DiffItem::AssertionRelationRemoved(r) => {
+            let _ = writeln!(out, "  id: {}", short_id(&r.id));
+            let _ = writeln!(out, "  from: {}", short_id(&r.from_assertion));
+            let _ = writeln!(out, "  to: {}", short_id(&r.to_assertion));
+            let _ = writeln!(out, "  kind: {}", r.kind);
+        }
+    }
+    out
+}
+
+pub fn merge_plan(diff: &ModelDiff) -> String {
+    let items = diff.items();
+    if items.is_empty() {
+        return "merge: no changes to apply".to_string();
+    }
+
+    let mut out = String::new();
+    let _ = writeln!(out, "merge: {} item(s) pending", items.len());
+    for (i, item) in items.iter().enumerate() {
+        let _ = writeln!(out, "  [{}] [pending] {}", i, item_label(item));
+    }
+    out
+}
+
+pub fn item_label(item: &DiffItem) -> String {
+    match item {
+        DiffItem::EntityAdded(e) => format!("+entity {} [{}]", e.qualified_name, e.kind),
+        DiffItem::EntityRemoved(e) => format!("-entity {} [{}]", e.qualified_name, e.kind),
+        DiffItem::AssertionAdded(a) => {
+            format!("+assertion {}|{}: {}", a.kind, a.status, a.claim)
+        }
+        DiffItem::AssertionRemoved(a) => {
+            format!("-assertion {}|{}: {}", a.kind, a.status, a.claim)
+        }
+        DiffItem::AssertionChanged(c) => {
+            format!(
+                "~assertion {} ({} → {})",
+                short_id(&c.before.id),
+                c.before.status,
+                c.after.status
+            )
+        }
+        DiffItem::EvidenceAdded(e) => format!("+evidence {}:{}", e.source, e.detail),
+        DiffItem::EvidenceRemoved(e) => format!("-evidence {}:{}", e.source, e.detail),
+        DiffItem::EntityRelationAdded(r) => {
+            format!(
+                "+entity_relation {} --{}--> {}",
+                short_id(&r.from_entity),
+                r.kind,
+                short_id(&r.to_entity)
+            )
+        }
+        DiffItem::EntityRelationRemoved(r) => {
+            format!(
+                "-entity_relation {} --{}--> {}",
+                short_id(&r.from_entity),
+                r.kind,
+                short_id(&r.to_entity)
+            )
+        }
+        DiffItem::AssertionRelationAdded(r) => {
+            format!(
+                "+dep {} → {}",
+                short_id(&r.from_assertion),
+                short_id(&r.to_assertion)
+            )
+        }
+        DiffItem::AssertionRelationRemoved(r) => {
+            format!(
+                "-dep {} → {}",
+                short_id(&r.from_assertion),
+                short_id(&r.to_assertion)
+            )
+        }
+    }
+}
+
+pub fn branch_list_report(branches: &[crate::model::BranchInfo]) -> String {
+    if branches.is_empty() {
+        return "branches: (none)".to_string();
+    }
+    let mut out = String::new();
+    for b in branches {
+        let size_kb = b.size_bytes as f64 / 1024.0;
+        let modified = b
+            .modified
+            .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let _ = writeln!(out, "- {} ({}KB, {})", b.name, size_kb as u64, modified);
     }
     out
 }

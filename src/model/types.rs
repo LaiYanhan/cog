@@ -204,6 +204,7 @@ pub enum ChangelogAction {
     CascadeMark,
     Depend,
     Verify,
+    DeleteEntity,
 }
 
 impl Display for ChangelogAction {
@@ -214,6 +215,7 @@ impl Display for ChangelogAction {
             Self::CascadeMark => "cascade_mark",
             Self::Depend => "depend",
             Self::Verify => "verify",
+            Self::DeleteEntity => "delete_entity",
         })
     }
 }
@@ -228,6 +230,7 @@ impl FromStr for ChangelogAction {
             "cascade_mark" => Ok(Self::CascadeMark),
             "depend" => Ok(Self::Depend),
             "verify" => Ok(Self::Verify),
+            "delete_entity" => Ok(Self::DeleteEntity),
             _ => Err("invalid changelog action"),
         }
     }
@@ -305,4 +308,15 @@ pub struct VerificationIssue {
     pub entity_name: Option<String>,
     pub assertion_id: Option<String>,
     pub detail: String,
+}
+
+/// Complete snapshot of the cognitive model, used for diff/merge operations.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelSnapshot {
+    pub entities: Vec<Entity>,
+    pub assertions: Vec<Assertion>,
+    pub evidences: Vec<Evidence>,
+    pub entity_relations: Vec<EntityRelation>,
+    pub assertion_relations: Vec<AssertionRelation>,
+    pub changelog: Vec<ChangelogEntry>,
 }

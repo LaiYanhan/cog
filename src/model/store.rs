@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::model::types::{
     Assertion, AssertionKind, AssertionRelation, AssertionRelationKind, AssertionStatus,
     ChangelogAction, ChangelogEntry, Entity, EntityKind, EntityRelation, EntityRelationKind,
-    Evidence, ModelStats, RelatedEntity, RelationDirection,
+    Evidence, ModelSnapshot, ModelStats, RelatedEntity, RelationDirection,
 };
 
 const SCHEMA: &str = r#"
@@ -118,6 +118,14 @@ impl Store {
         }
     }
 
+    pub fn vacuum_into(&self, target_path: &Path) -> Result<()> {
+        let path_str = target_path.to_string_lossy();
+        self.conn
+            .execute_batch(&format!("VACUUM INTO '{}'", path_str.replace('\'', "''")))
+            .context("failed to vacuum into target path")?;
+        Ok(())
+    }
+
     pub fn upsert_entity(&self, qualified_name: &str, kind: EntityKind) -> Result<Entity> {
         if let Some(entity) = self.get_entity_by_name(qualified_name)? {
             return Ok(entity);
@@ -143,6 +151,53 @@ impl Store {
             .with_context(|| format!("failed to insert entity: {qualified_name}"))?;
 
         Ok(entity)
+    }
+
+    /// Insert an entity with a pre-existing UUID (used during merge).
+    /// Returns Ok(false) if an entity with the same qualified_name already exists.
+    pub fn insert_entity(&self, entity: &Entity) -> Result<bool> {
+        if self.get_entity_by_name(&entity.qualified_name)?.is_some() {
+            return Ok(false);
+        }
+        self.conn
+            .execute(
+                "INSERT INTO entities (id, qualified_name, kind, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    entity.id,
+                    entity.qualified_name,
+                    entity.kind.to_string(),
+                    to_ts(entity.created_at)
+                ],
+            )
+            .with_context(|| format!("failed to insert entity: {}", entity.qualified_name))?;
+        Ok(true)
+    }
+    /// Insert an assertion with a pre-existing UUID (used during merge).
+    /// Unlike create_assertion, this does NOT auto-create evidence — evidence
+    /// arrives as separate DiffItem::EvidenceAdded items.
+    /// Returns Ok(false) if an assertion with the same id already exists.
+    pub fn insert_assertion(&self, assertion: &Assertion) -> Result<bool> {
+        if self.get_assertion(&assertion.id)?.is_some() {
+            return Ok(false);
+        }
+        self.conn
+            .execute(
+                "INSERT INTO assertions \
+                 (id, entity_id, kind, claim, status, created_at, updated_at, retraction_reason) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    assertion.id,
+                    assertion.entity_id,
+                    assertion.kind.to_string(),
+                    assertion.claim,
+                    assertion.status.to_string(),
+                    to_ts(assertion.created_at),
+                    to_ts(assertion.updated_at),
+                    assertion.retraction_reason,
+                ],
+            )
+            .with_context(|| format!("failed to insert assertion: {}", assertion.id))?;
+        Ok(true)
     }
 
     pub fn get_entity(&self, id: &str) -> Result<Option<Entity>> {
@@ -218,15 +273,15 @@ impl Store {
             )
             .context("failed to prepare list_entities_with_counts statement")?;
 
-        let mut rows = stmt.query([]).context("failed to query entities with counts")?;
+        let mut rows = stmt
+            .query([])
+            .context("failed to query entities with counts")?;
         let mut result = Vec::new();
-        while let Some(row) = rows.next().context("failed to iterate entities with counts")? {
-            let entity = map_entity_row(
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-            )?;
+        while let Some(row) = rows
+            .next()
+            .context("failed to iterate entities with counts")?
+        {
+            let entity = map_entity_row(row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)?;
             let count: usize = row.get::<_, i64>(4)? as usize;
             result.push((entity, count));
         }
@@ -308,9 +363,7 @@ impl Store {
         // Fallback: prefix match for short IDs
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT id FROM assertions WHERE id LIKE ?1 || '%' ORDER BY created_at",
-            )
+            .prepare("SELECT id FROM assertions WHERE id LIKE ?1 || '%' ORDER BY created_at")
             .context("failed to prepare resolve_assertion_id statement")?;
         let mut rows = stmt
             .query(params![id])
@@ -322,7 +375,11 @@ impl Store {
         match matches.len() {
             0 => bail!("assertion not found: {id}"),
             1 => Ok(matches.into_iter().next().unwrap()),
-            _ => bail!("ambiguous short id '{}', matches {} assertions", id, matches.len()),
+            _ => bail!(
+                "ambiguous short id '{}', matches {} assertions",
+                id,
+                matches.len()
+            ),
         }
     }
 
@@ -424,6 +481,51 @@ impl Store {
             .with_context(|| format!("failed to insert evidence for assertion: {assertion_id}"))?;
 
         Ok(evidence)
+    }
+
+    /// Insert evidence with a pre-existing UUID (used during merge).
+    /// Returns Ok(false) if evidence with the same id already exists.
+    pub fn insert_evidence(&self, evidence: &Evidence) -> Result<bool> {
+        if self.get_evidence(&evidence.id)?.is_some() {
+            return Ok(false);
+        }
+        self.conn
+            .execute(
+                "INSERT INTO evidences (id, assertion_id, source, detail, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    evidence.id,
+                    evidence.assertion_id,
+                    evidence.source,
+                    evidence.detail,
+                    to_ts(evidence.created_at)
+                ],
+            )
+            .with_context(|| format!("failed to insert evidence: {}", evidence.id))?;
+        Ok(true)
+    }
+
+    pub fn get_evidence(&self, id: &str) -> Result<Option<Evidence>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, assertion_id, source, detail, created_at FROM evidences WHERE id = ?1",
+            )
+            .context("failed to prepare get_evidence statement")?;
+
+        let mut rows = stmt
+            .query(params![id])
+            .context("failed to query evidence")?;
+
+        match rows.next().context("failed to iterate evidence")? {
+            Some(row) => Ok(Some(map_evidence_row(
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            )?)),
+            None => Ok(None),
+        }
     }
 
     pub fn get_evidence_for_assertion(&self, assertion_id: &str) -> Result<Vec<Evidence>> {
@@ -687,10 +789,7 @@ impl Store {
             .context("failed to query impact neighbors")?;
 
         let mut entities = Vec::new();
-        while let Some(row) = rows
-            .next()
-            .context("failed to iterate impact neighbors")?
-        {
+        while let Some(row) = rows.next().context("failed to iterate impact neighbors")? {
             entities.push(map_entity_row(
                 row.get(0)?,
                 row.get(1)?,
@@ -833,6 +932,101 @@ impl Store {
             retracted_assertions: retracted_assertions as u64,
             evidences: evidences as u64,
             corrections: corrections as u64,
+        })
+    }
+
+    /// Delete an entity and all associated data (assertions, evidence, relations, changelog).
+    /// This is a destructive operation — all cross-references are removed.
+    /// Returns Ok(false) if the entity does not exist.
+    pub fn delete_entity(&self, qualified_name: &str) -> Result<bool> {
+        let entity = match self.get_entity_by_name(qualified_name)? {
+            Some(e) => e,
+            None => return Ok(false),
+        };
+        let entity_id = &entity.id;
+
+        // Get all assertion IDs for the entity
+        let assertions = self.get_assertions_for_entity(entity_id)?;
+        let assertion_ids: Vec<String> = assertions.iter().map(|a| a.id.clone()).collect();
+
+        self.transaction(|| {
+            // Delete evidence for all assertions
+            for aid in &assertion_ids {
+                self.conn
+                    .execute("DELETE FROM evidences WHERE assertion_id = ?1", params![aid])
+                    .with_context(|| format!("failed to delete evidence for assertion: {aid}"))?;
+            }
+
+            // Delete assertion relations involving these assertions
+            for aid in &assertion_ids {
+                self.conn
+                    .execute(
+                        "DELETE FROM assertion_relations WHERE from_assertion = ?1 OR to_assertion = ?1",
+                        params![aid],
+                    )
+                    .with_context(|| format!("failed to delete assertion relations for: {aid}"))?;
+            }
+
+            // Delete assertions
+            for aid in &assertion_ids {
+                self.conn
+                    .execute("DELETE FROM assertions WHERE id = ?1", params![aid])
+                    .with_context(|| format!("failed to delete assertion: {aid}"))?;
+            }
+
+            // Delete entity relations
+            self.conn
+                .execute(
+                    "DELETE FROM entity_relations WHERE from_entity = ?1 OR to_entity = ?1",
+                    params![entity_id],
+                )
+                .context("failed to delete entity relations")?;
+
+            // Delete changelog entries referencing this entity or its assertions
+            self.conn
+                .execute(
+                    "DELETE FROM changelog WHERE target_id = ?1",
+                    params![entity_id],
+                )
+                .context("failed to delete changelog entries")?;
+            for aid in &assertion_ids {
+                self.conn
+                    .execute("DELETE FROM changelog WHERE target_id = ?1", params![aid])
+                    .with_context(|| format!("failed to delete changelog for assertion: {aid}"))?;
+            }
+
+            // Delete the entity itself
+            self.conn
+                .execute("DELETE FROM entities WHERE id = ?1", params![entity_id])
+                .context("failed to delete entity")?;
+
+            Ok(())
+        })?;
+
+        Ok(true)
+    }
+
+    /// Snapshot the entire model state under a BEGIN/COMMIT for consistency.
+    pub fn snapshot(&self) -> Result<ModelSnapshot> {
+        // Execute all reads inside a transaction for snapshot isolation.
+        // All six list methods run before checking errors, then we commit
+        // (which is a no-op for reads) and propagate any failures.
+        self.conn.execute_batch("BEGIN")?;
+        let entities = self.list_entities();
+        let assertions = self.list_assertions();
+        let evidences = self.list_evidences();
+        let entity_relations = self.list_entity_relations();
+        let assertion_relations = self.list_assertion_relations();
+        let changelog = self.list_changelog_entries();
+        self.conn.execute_batch("COMMIT")?;
+
+        Ok(ModelSnapshot {
+            entities: entities?,
+            assertions: assertions?,
+            evidences: evidences?,
+            entity_relations: entity_relations?,
+            assertion_relations: assertion_relations?,
+            changelog: changelog?,
         })
     }
 }

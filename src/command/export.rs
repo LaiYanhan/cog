@@ -1,21 +1,12 @@
 use anyhow::Result;
-use serde::Serialize;
 
 use crate::command::CommandOutput;
 use crate::model::{ExportFormat, Store};
 
-#[derive(Debug, Serialize)]
-struct ExportSnapshot {
-    entities: Vec<crate::model::Entity>,
-    assertions: Vec<crate::model::Assertion>,
-    evidences: Vec<crate::model::Evidence>,
-    entity_relations: Vec<crate::model::EntityRelation>,
-    assertion_relations: Vec<crate::model::AssertionRelation>,
-    changelog: Vec<crate::model::ChangelogEntry>,
-}
+use crate::model::ModelSnapshot;
 
 pub fn execute(store: &Store, format: ExportFormat) -> Result<CommandOutput> {
-    let snapshot = ExportSnapshot {
+    let snapshot = ModelSnapshot {
         entities: store.list_entities()?,
         assertions: store.list_assertions()?,
         evidences: store.list_evidences()?,
@@ -33,7 +24,7 @@ pub fn execute(store: &Store, format: ExportFormat) -> Result<CommandOutput> {
     Ok(CommandOutput::success(text))
 }
 
-fn snapshot_to_dot(snapshot: &ExportSnapshot) -> String {
+fn snapshot_to_dot(snapshot: &ModelSnapshot) -> String {
     let mut out = String::from("digraph cognitive_model {\n");
     out.push_str("  rankdir=LR;\n");
 

@@ -1,5 +1,7 @@
 pub mod assert_cmd;
+pub mod branch_cmd;
 pub mod depend;
+pub mod entity_cmd;
 pub mod export;
 pub mod impact;
 pub mod index_cmd;
