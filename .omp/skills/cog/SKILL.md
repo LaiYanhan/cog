@@ -49,37 +49,32 @@ cog retract <id> --reason "<why>"
 ```
 
 ### Reading from the model
-
-**Show all assertions for an entity:**
+**Show active assertions for an entity (default filters out retracted):**
 ```bash
 cog query <entity>
+cog query <entity> --all  # include retracted
 ```
-
 **What happens if this entity changes? (BFS downstream impact):**
 ```bash
 cog impact <entity>
 ```
-
 **Why does this entity exist? (full dependency chain):**
 ```bash
 cog trace <entity>
 ```
-
-**List all entities:**
+**List all entities with active assertion counts (sorted by importance):**
 ```bash
 cog index
+# Output: - entity_name [N] where N = active assertion count
 ```
-
 **Model statistics:**
 ```bash
 cog stats
 ```
-
 **Structural consistency checks:**
 ```bash
 cog verify [--scope <entity>]
 ```
-
 **Export model (json/toml/dot):**
 ```bash
 cog export [--format json|toml|dot]
@@ -156,6 +151,12 @@ cog assert cog --kind correction --claim "Added resolve_assertion_id for short I
 - **Single-file DB**: `.cog/cog.db` with WAL mode and foreign keys. Gitignored — each developer/agent maintains their own model.
 - **Short IDs everywhere**: Display uses 8-char IDs. Input accepts 8-char or full UUIDs.
 
+## Lessons from Practice
+
+- **`query` defaults to active-only**. Use `--all` only when investigating retraction history. Most workflow needs active knowledge.
+- **`index` is your first stop**. The assertion count tells you which entities the model knows most about. High-count entities are architectural anchors.
+- **Link assertions with `--depends-on`**. Individual assertions are facts; `--depends-on` chains are reasoning. Without dependency chains, `trace` has nothing to traverse.
+- **Record cross-cutting invariants on the parent entity**. If a rule applies to multiple modules (e.g. "all IDs resolve via prefix match"), assert it on the root entity (`cog`) not on each leaf.
 ## Database Location
 
 Default: `.cog/cog.db` in current directory. Override with `--db <path>` or `COG_DB` env var.
