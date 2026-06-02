@@ -22,7 +22,8 @@ pub fn execute(store: &Store, scope: Option<&str>) -> Result<CommandOutput> {
         let assertions = store.get_assertions_for_entity(&entity.id)?;
         let relation_count = store.count_relations_for_entity(&entity.id)?;
 
-        if assertions.is_empty() && relation_count == 0 {
+        let active_count = assertions.iter().filter(|a| a.status == AssertionStatus::Active).count();
+        if active_count == 0 && relation_count == 0 {
             issues.push(VerificationIssue {
                 kind: VerificationIssueKind::IsolatedEntity,
                 entity_name: Some(entity.qualified_name.clone()),
@@ -84,7 +85,7 @@ pub fn execute(store: &Store, scope: Option<&str>) -> Result<CommandOutput> {
             "- {:?} entity={} assertion={} detail={}",
             issue.kind,
             issue.entity_name.as_deref().unwrap_or("-"),
-            issue.assertion_id.as_deref().unwrap_or("-"),
+            issue.assertion_id.as_deref().map(|id| crate::format::short_id(id)).unwrap_or("-"),
             issue.detail
         );
     }
