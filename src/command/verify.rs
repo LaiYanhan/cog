@@ -11,10 +11,13 @@ pub fn execute(store: &Store, scope: Option<&str>) -> Result<CommandOutput> {
     let mut issues = Vec::new();
     let entities = store.list_entities()?;
     let scope_prefix = scope.unwrap_or_default();
+    let checked_count = entities.iter()
+        .filter(|entity| scope.is_none_or(|_| entity.qualified_name.starts_with(scope_prefix)))
+        .count();
 
     for entity in entities
         .into_iter()
-        .filter(|entity| scope.is_none_or(|_| entity.qualified_name.starts_with(scope_prefix)))
+        .filter(|entity| entity.qualified_name.starts_with(scope_prefix))
     {
         let assertions = store.get_assertions_for_entity(&entity.id)?;
         let relation_count = store.count_relations_for_entity(&entity.id)?;
@@ -49,20 +52,19 @@ pub fn execute(store: &Store, scope: Option<&str>) -> Result<CommandOutput> {
                         kind: VerificationIssueKind::DependencyOnRetracted,
                         entity_name: Some(entity.qualified_name.clone()),
                         assertion_id: Some(assertion.id.clone()),
-                        detail: format!("depends on retracted assertion {}", dependency.id),
+                        detail: format!("depends on retracted assertion {}", crate::format::short_id(&dependency.id)),
                     });
                 } else if dependency.status == AssertionStatus::Uncertain {
                     issues.push(VerificationIssue {
                         kind: VerificationIssueKind::DependencyOnUncertain,
                         entity_name: Some(entity.qualified_name.clone()),
                         assertion_id: Some(assertion.id.clone()),
-                        detail: format!("depends on uncertain assertion {}", dependency.id),
+                        detail: format!("depends on uncertain assertion {}", crate::format::short_id(&dependency.id)),
                     });
                 }
             }
         }
     }
-
     Changelog::append(
         store,
         ChangelogAction::Verify,
@@ -71,7 +73,7 @@ pub fn execute(store: &Store, scope: Option<&str>) -> Result<CommandOutput> {
     )?;
 
     if issues.is_empty() {
-        return Ok(CommandOutput::success("verify: ok"));
+        return Ok(CommandOutput::success(format!("verify: ok (checked {} entities: isolated, missing evidence, dangling dependencies)", checked_count)));
     }
 
     let mut report = String::new();
