@@ -25,7 +25,13 @@ pub fn execute(
     }
 
     let entity_record = store.upsert_entity(entity, infer_entity_kind(entity))?;
-    let assertion = store.create_assertion(&entity_record.id, kind, claim, grounds, resolved_depends_on.as_deref())?;
+    let assertion = store.create_assertion(
+        &entity_record.id,
+        kind,
+        claim,
+        grounds,
+        resolved_depends_on.as_deref(),
+    )?;
 
     Changelog::append(
         store,
@@ -36,7 +42,11 @@ pub fn execute(
 
     let mut out = String::new();
     out.push_str("assertion created\n");
-    out.push_str(&format!("- id: {} ({})\n", crate::format::short_id(&assertion.id), assertion.id));
+    out.push_str(&format!(
+        "- id: {} ({})\n",
+        crate::format::short_id(&assertion.id),
+        assertion.id
+    ));
     out.push_str(&format!("- entity: {}\n", entity_record.qualified_name));
     out.push_str(&format!("- kind: {}\n", assertion.kind));
     out.push_str(&format!("- claim: {}\n", assertion.claim));

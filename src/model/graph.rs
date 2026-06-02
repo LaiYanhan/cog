@@ -136,7 +136,8 @@ impl ImpactResult {
             .flatten()
             .collect::<Vec<_>>();
 
-        let affected_assertions = store.get_assertions_for_entities(&entity_ids)?
+        let affected_assertions = store
+            .get_assertions_for_entities(&entity_ids)?
             .into_iter()
             .filter(|a| a.status == AssertionStatus::Active)
             .collect();
@@ -178,7 +179,11 @@ impl TraceResult {
 
         let related_entities = store.get_related_entities(&entity.id)?;
 
-        Ok(Self { entity, assertions, related_entities })
+        Ok(Self {
+            entity,
+            assertions,
+            related_entities,
+        })
     }
 }
 
