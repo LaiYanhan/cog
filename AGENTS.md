@@ -238,6 +238,98 @@ cargo run -- verify --scan
 | Something fragile or risky | `fragility` | `"Node text extraction assumes tree-sitter node is within source bounds — panics if not"` |
 | A fix applied during this session | `correction` | `"Fixed off-by-one in path_to_qualified — was dropping first segment"` |
 
+## Meta-Loop: Using Cog to Improve Cog
+
+This project's self-bootstrapping creates a unique feedback loop: **modeling cog with cog naturally exposes cog's own limitations**. Every friction point you encounter while using cog on itself is valuable signal about what needs improvement.
+
+### The Meta-Loop Cycle
+
+```
+┌────────────────────────────────────────────────────┐
+│  1. Model cog with cog (as described above)        │
+│     → init, assert, query, impact, verify          │
+│                                                    │
+│  2. Feel the friction                              │
+│     → "This query output is too verbose"           │
+│     → "I can't express X kind of knowledge"        │
+│     → "The verify check misses Y pattern"          │
+│     → "This command is missing a flag I need"      │
+│                                                    │
+│  3. Record the problem as a fragility assertion    │
+│     → cog assert <entity> --kind fragility ...     │
+│                                                    │
+│  4. Branch and prototype the fix                   │
+│     → cog branch create --name fix-<issue>         │
+│     → cog branch switch fix-<issue>                │
+│     → Record the improvement as assertions         │
+│     → Implement the code change                    │
+│                                                    │
+│  5. Diff, validate, merge                          │
+│     → cog branch switch _main                      │
+│     → cog branch diff fix-<issue>                  │
+│     → Run tests, verify                            │
+│     → cog branch merge fix-<issue> --apply-all     │
+│                                                    │
+│  6. Retract the old fragility, assert correction   │
+│     → cog retract <old-fragility-id>               │
+│     → cog assert <entity> --kind correction ...    │
+└────────────────────────────────────────────────────┘
+```
+
+### Concrete Scenarios
+
+| What you feel | The meta-loop action |
+|---------------|---------------------|
+| Output is hard to parse or too verbose | Assert `format::*` fragility → branch to add `--json` or `--quiet` flag → implement → merge |
+| Can't batch-record many assertions at once | Assert `command::assert_cmd` fragility → branch to add bulk-assert or `--file` flag → implement → merge |
+| `verify` misses a specific issue pattern | Assert `command::verify::execute` fragility → branch to add the check → implement → merge |
+| `init` scanned too much noise (e.g. benchmark/) | Assert `analysis::extract::Scanner::scan` fragility → branch to add better skip patterns or `.cogignore` → implement → merge |
+| Branch diff is confusing or incomplete | Assert `model::diff::ModelDiff` fragility → branch to improve diff output → implement → merge |
+| Missing a command or flag that would make your workflow smoother | Assert the relevant module's `intent` with `"would benefit from <feature>"` → branch to design and implement → merge |
+| A graph algorithm is too slow for a real codebase | Assert `model::graph` fragility → branch to optimize → benchmark → merge |
+
+### Rules of the Meta-Loop
+
+- **Every friction point must be captured as an assertion** — `fragility` for the problem, `correction` after the fix. Future agents learn from past pain.
+- **Use branches for every prototype** — never modify the main model directly when experimenting with improvements to cog itself. The branch preserves a clean diff and lets you revert cleanly.
+- **Ground the improvement design on the branch** — use `plan:*` grounds for assertions that describe the *planned* improvement, migrate to `code:*` after implementation (same as the "From Scratch" workflow).
+- **If the improvement changes the schema or breaks compatibility** — follow [Data Preservation During Breaking Changes](#data-preservation-during-breaking-changes) above. Branch first, migrate, never destroy.
+- **When the meta-loop reveals a fundamental design limitation** (not just a missing feature) — assert it as an `intent` limitation on the affected module, then branch a more thorough redesign. The branch diff documents the evolution of the design.
+
+### Example: Discovering and Fixing a Limitation
+
+```sh
+# Step 1: While modeling cog, you notice `cog index` output is hard to grep
+cog assert format::entity_index_with_counts --kind fragility \
+  --claim "Output uses aligned columns that are hard to parse programmatically" \
+  --grounds "meta-loop:cog-self-modeling"
+
+# Step 2: Branch and design the fix
+cog branch create --name add-index-json-flag
+cog branch switch add-index-json-flag
+cog assert command::index_cmd::execute --kind intent \
+  --claim "Should support --json flag for machine-parseable output" \
+  --grounds "plan:improvement"
+
+# Step 3: Implement the change in src/command/index_cmd.rs and src/format.rs
+# (actual code changes happen here)
+
+# Step 4: Return to main, review, merge
+cog branch switch _main
+cog branch diff add-index-json-flag
+cargo test
+cog branch merge add-index-json-flag --apply-all
+
+# Step 5: Record the correction
+cog retract <old-fragility-id> --reason "implemented --json flag for index command"
+cog assert format --kind correction \
+  --claim "Added --json output mode to index command for programmatic consumption" \
+  --grounds "code:command::index_cmd::execute"
+
+# Cleanup
+cog branch drop add-index-json-flag
+```
+
 ## Data Preservation During Breaking Changes
 
 Cog is under active development. Schema changes, query interface changes, or storage format changes will occur. **You MUST NEVER delete or reset `.cog/cog.db`** — that file accumulates valuable knowledge across sessions.
@@ -284,4 +376,3 @@ When a code change breaks compatibility with existing stored data:
 - Silently ignoring old data that doesn't fit the new schema — **NEVER**. Migrate it or error with a clear message.
 - Reusing UUIDs or reassigning entity IDs — **NEVER**.
 - Silently falling back to a fresh DB when the existing one has an incompatible schema — **NEVER**. The agent must report the incompatibility and propose a migration.
-
