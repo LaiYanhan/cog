@@ -1,3 +1,7 @@
 /target
 .omp
 .cog
+__pycache__
+*.pyc
+terminal-bench
+jobs
