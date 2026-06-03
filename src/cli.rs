@@ -60,6 +60,12 @@ pub enum Commands {
         /// Auto-delete isolated entities found during verification
         #[arg(long)]
         clean: bool,
+        /// Compare model against actual code
+        #[arg(long)]
+        scan: bool,
+        /// Path to scan (used with --scan; defaults to current directory)
+        #[arg(long)]
+        scan_path: Option<PathBuf>,
     },
     Export {
         #[arg(long, default_value = "json")]
@@ -73,6 +79,19 @@ pub enum Commands {
     Branch {
         #[command(subcommand)]
         action: BranchAction,
+    },
+    Init {
+        /// Path to scan (defaults to current directory)
+        path: Option<PathBuf>,
+        /// Only show what would be created, don't write to database
+        #[arg(long)]
+        dry_run: bool,
+        /// Maximum directory traversal depth
+        #[arg(long)]
+        depth: Option<usize>,
+        /// Only scan these languages (comma-separated, e.g. python,rust)
+        #[arg(long)]
+        lang: Option<String>,
     },
 }
 
@@ -136,8 +155,22 @@ impl Cli {
             Commands::Depend { entity_a, on, kind } => {
                 command::depend::execute(store, entity_a, on, *kind)
             }
-            Commands::Verify { scope, clean } => {
-                command::verify::execute(store, scope.as_deref(), *clean)
+            Commands::Verify {
+                scope,
+                clean,
+                scan,
+                scan_path,
+            } => {
+                let resolved = if *scan {
+                    Some(
+                        scan_path
+                            .as_deref()
+                            .unwrap_or_else(|| std::path::Path::new(".")),
+                    )
+                } else {
+                    None
+                };
+                command::verify::execute(store, scope.as_deref(), *clean, resolved)
             }
             Commands::Export { format } => command::export::execute(store, *format),
             Commands::Stats => command::stats::execute(store),
@@ -145,6 +178,21 @@ impl Cli {
             Commands::Branch { action } => {
                 let mgr = BranchManager::new(&self.db_path());
                 command::branch_cmd::execute(store, &mgr, action)
+            }
+            Commands::Init {
+                path,
+                dry_run,
+                depth,
+                lang,
+            } => {
+                let scan_path = path
+                    .as_deref()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."));
+                let lang_list: Option<Vec<String>> = lang
+                    .as_ref()
+                    .map(|s| s.split(',').map(|l| l.trim().to_string()).collect());
+                command::init_cmd::execute(store, &scan_path, *dry_run, *depth, lang_list)
             }
         }
     }

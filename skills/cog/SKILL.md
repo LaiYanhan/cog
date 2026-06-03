@@ -46,6 +46,12 @@ accepting IDs resolve short IDs automatically.
 
 ## Command Reference
 
+### Scanning
+
+| Command | Purpose |
+|---------|---------|
+| `cog init [PATH] [--dry-run] [--depth <N>] [--lang python,rust,...]` | Scan a codebase with tree-sitter, creating entities for definitions (functions, classes, structs, methods), directory modules, and import relationships. All auto-generated entities carry grounds `auto:scan`. |
+
 ### Writing
 
 | Command | Purpose |
@@ -64,7 +70,7 @@ accepting IDs resolve short IDs automatically.
 | `cog trace <entity>` | Full picture: assertions, evidence, depends-on tree, entity relations |
 | `cog index` | List all entities sorted by active assertion count |
 | `cog stats` | Model statistics (entity/assertion/relation counts) |
-| `cog verify [--scope <entity>] [--clean]` | Structural consistency check: isolated entities, missing evidence, dangling deps |
+| `cog verify [--scope <entity>] [--clean] [--scan]` | Structural consistency check. `--scan` also compares the model against the actual codebase, reporting unmodeled and stale entities. |
 | `cog export [--format json\|toml\|dot]` | Export model in machine-readable format |
 
 ### Branching
@@ -113,6 +119,7 @@ Override: `--db <path>` or `COG_DB` environment variable.
 
 | Situation | Guide |
 |-----------|-------|
+| Encountering an unfamiliar codebase (with existing code) | [WORKFLOWS.md — Analyzing & Debugging](WORKFLOWS.md#analyzing--debugging-an-existing-codebase) |
 | Starting a new project (no code yet) | [WORKFLOWS.md — From Scratch](WORKFLOWS.md#starting-a-new-project-from-scratch) |
 | Understanding unfamiliar existing code | [WORKFLOWS.md — Retrofitting](WORKFLOWS.md#after-reading-unfamiliar-code-retrofitting) |
 | Planning a risky refactor | [WORKFLOWS.md — Risky Refactor](WORKFLOWS.md#before-a-risky-refactor) |

@@ -1,6 +1,6 @@
 # cog
 
-A cognitive model for LLM coding agents. Records knowledge claims (assertions) about code — contracts, invariants, fragility points — and tracks their dependencies so agents can reason about what they know and what might break.
+A cognitive model for LLM coding agents. Scans codebases with tree-sitter to build a structural model (entities + containment hierarchy), then records knowledge claims (assertions) about code — contracts, invariants, fragility points — tracking dependencies so agents can reason about what they know and what might break.
 
 ## Install
 
@@ -11,8 +11,10 @@ cargo build --release
 The binary is `./target/release/cog`.
 
 ## Quickstart
-
 ```sh
+# Auto-scan codebase structure (entities + containment)
+cog init .
+
 # Record what you've learned
 cog assert auth::login --kind contract \
     --claim "Returns Ok(token) on valid credentials, Err on invalid" \
@@ -21,17 +23,36 @@ cog assert auth::login --kind contract \
 # Query what you know
 cog query auth::login
 
-# Check structural consistency
-cog verify
+# Check for stale/unmodeled code
+cog verify --scan
 ```
 
 ## Commands
+
+### Scanning
+
+```sh
+# Auto-scan a codebase — creates entities + contains relations for all definitions
+cog init [PATH]
+cog init .                      # scan current directory
+cog init src/                   # scan a subtree
+cog init . --lang rust          # filter to one language
+cog init . --depth 3            # limit directory depth
+cog init . --dry-run            # preview without writing
+
+# Detect drift between model and actual code
+cog verify --scan               # list stale (removed) and unmodeled (new) entities
+cog verify --scan --clean       # also delete stale entities from model
+```
+
+Supported languages: Python, Rust, JavaScript/TypeScript, C, Go, Java.
 
 ### Writing to the model
 
 ```sh
 # Declare an assertion about an entity
 cog assert <entity> --kind <kind> --claim "<claim>" --grounds "<source>"
+
 # Optional: --depends-on <id> to chain reasoning
 
 # Link two entities structurally
@@ -61,6 +82,7 @@ cog trace <entity>
 cog index
 
 # Structural consistency checks
+cog verify --scan              # detect stale/unmodeled code
 cog verify
 cog verify --scope <entity>       # scope to a subtree
 cog verify --clean                # also delete isolated entities
@@ -146,6 +168,7 @@ Do **not** use `depends_on` for entity relations — that is an assertion-level 
 - **Dependency** — assertion-level `depends-on` chain; when a base assertion is retracted, dependents cascade to `uncertain` (TMS-style truth maintenance)
 - **Retraction** — marks an assertion as retracted and cascades `uncertain` to dependent assertions that have no other active support
 - **Branch** — snapshot-based sandbox for speculative reasoning; merge preserves UUIDs
+- **Scan** — tree-sitter based code structure analysis. `cog init` walks directories, parses files into ASTs, extracts functions/classes/methods/types, and creates entities + `contains` relations. All auto-created entities are grounded `auto:scan`, clearly separated from LLM-authored knowledge.
 
 ## Ids
 

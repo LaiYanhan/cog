@@ -3,14 +3,96 @@
 Scenario-based recipes for using cog. Each workflow is a concrete sequence
 of commands — run them, read the output, act on it.
 
-- [Starting a New Project (From Scratch)](#starting-a-new-project-from-scratch)
-- [After Reading Unfamiliar Code (Retrofitting)](#after-reading-unfamiliar-code-retrofitting)
+ - [Analyzing & Debugging an Existing Codebase](#analyzing--debugging-an-existing-codebase)
+ - [Starting a New Project (From Scratch)](#starting-a-new-project-from-scratch)
+ - [After Reading Unfamiliar Code (Retrofitting)](#after-reading-unfamiliar-code-retrofitting)
 - [Before a Risky Refactor](#before-a-risky-refactor)
 - [When You Find a Subtle Trap](#when-you-find-a-subtle-trap)
 - [When Retracting Outdated Knowledge](#when-retracting-outdated-knowledge)
 - [When You Learn from a Mistake](#when-you-learn-from-a-mistake)
 - [Linking Entities During Architecture Exploration](#linking-entities-during-architecture-exploration)
 - [Progressive Grounding Lifecycle](#progressive-grounding-lifecycle)
+
+## Analyzing & Debugging an Existing Codebase
+
+When you encounter an unfamiliar codebase with existing code, use `cog init`
+to build a structural skeleton automatically, then deepen it with semantic
+knowledge that only an LLM can provide.
+
+### Phase 1: Structural scan (automated)
+
+`cog init` uses tree-sitter to parse source files and extract definitions
+(functions, classes, structs, methods), directory structure (modules), and
+import/dependency relationships — all without any manual input.
+
+```bash
+# Scan the project directory
+cog init /path/to/project
+
+# Review what was discovered
+cog stats                        # entity/relation counts
+cog index                        # entities sorted by assertion count
+cog trace <root-module>          # see the full hierarchy
+```
+
+All auto-generated entities carry grounds `auto:scan` so you can distinguish
+them from manually asserted knowledge.
+
+### Phase 2: Semantic deepening (your job — automated analysis cannot do this)
+
+Read the code. For each entity you understand, assert the knowledge that
+tree-sitter cannot extract:
+
+* **contracts** — what does this function promise its callers?
+* **invariants** — what must always be true, or a bug results?
+* **fragility** — what could break and why?
+* **intent** — why does this code exist? What design decision does it encode?
+
+```bash
+# After reading a function, record what you learned
+cog assert auth::login --kind contract \
+  --claim "Returns Ok(token) on valid credentials, Err on invalid" \
+  --grounds "code:src/auth.rs:45-67"
+
+cog assert auth::login --kind invariant \
+  --claim "Password is zeroed from memory before returning" \
+  --grounds "code:src/auth.rs:62"
+
+cog assert auth::login --kind fragility \
+  --claim "Token expiry not checked on refresh — stale tokens accepted after rotation" \
+  --grounds "code:src/auth.rs:80-85"
+
+# Link entities discovered during reading
+cog depend auth::login --on auth::token::validate --kind calls
+```
+
+### Phase 3: Change planning
+
+Before making changes, understand the blast radius.
+
+```bash
+cog impact auth::login          # what depends on this?
+cog trace auth::login           # full picture: assertions + deps
+
+# Sandbox your planned fix
+cog branch create --name fix-token-refresh
+cog branch switch fix-token-refresh
+```
+
+### Phase 4: Validation
+
+```bash
+# Check model ↔ code consistency (detects stale/unmodeled entities)
+cog verify --scan
+
+# Check structural consistency (orphan entities, dangling deps)
+cog verify
+```
+
+> **Key principle**: Automated scanning gives you structure (entity names,
+> kinds, containment, imports). Your job is to add the semantics — the
+> *why*, the *what-could-break*, the *what-it-promises*. That is the
+> irreplaceable value an LLM provides over a parser.
 
 ---
 
