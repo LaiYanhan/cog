@@ -202,48 +202,41 @@ pub fn execute(
         }
     }
 
+    // Build index: module_path → containing file's qualified name (avoids O(imports × files) loop).
+    let mut import_file_map: HashMap<String, String> = HashMap::new();
+    for file_scan in &result.file_scans {
+        let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
+        let file_qname = path_to_qualified(rel);
+        for imp in &file_scan.imports {
+            import_file_map
+                .entry(imp.module_path.clone())
+                .or_insert_with(|| file_qname.clone());
+        }
+    }
+
     // Create uses relations for imports (only if target entity exists)
     for import in &result.imports {
+        let file_qname = match import_file_map.get(&import.module_path) {
+            Some(fq) => fq.clone(),
+            None => continue,
+        };
+        let from_id = match file_entities.get(&file_qname) {
+            Some(id) => id.clone(),
+            None => continue,
+        };
+
         // Resolve the import's module_path as a direct entity
         if let Some(target_id) = def_entity_ids.get(&import.module_path) {
-            for file_scan in &result.file_scans {
-                if file_scan
-                    .imports
-                    .iter()
-                    .any(|imp| imp.module_path == import.module_path)
-                {
-                    let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
-                    let file_qname = path_to_qualified(rel);
-                    if let Some(from_id) = file_entities.get(&file_qname) {
-                        store.add_entity_relation(from_id, target_id, EntityRelationKind::Uses)?;
-                        uses_count += 1;
-                    }
-                    break;
-                }
-            }
+            store.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
+            uses_count += 1;
         }
 
         // Also try qualified names for individual imported items
         for name in &import.imported_names {
             let qualified = format!("{}::{}", import.module_path, name);
             if let Some(target_id) = def_entity_ids.get(&qualified) {
-                for file_scan in &result.file_scans {
-                    if file_scan.imports.iter().any(|imp| {
-                        imp.module_path == import.module_path && imp.imported_names.contains(name)
-                    }) {
-                        let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
-                        let file_qname = path_to_qualified(rel);
-                        if let Some(from_id) = file_entities.get(&file_qname) {
-                            store.add_entity_relation(
-                                from_id,
-                                target_id,
-                                EntityRelationKind::Uses,
-                            )?;
-                            uses_count += 1;
-                        }
-                        break;
-                    }
-                }
+                store.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
+                uses_count += 1;
             }
         }
     }
