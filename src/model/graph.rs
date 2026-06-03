@@ -33,7 +33,14 @@ impl CascadeResult {
             bail!("assertion already retracted: {assertion_id}");
         }
 
-        store.transaction(|| {
+        // Build the retracted view from `current` — avoids a re-fetch after the transaction.
+        let retracted = Assertion {
+            status: AssertionStatus::Retracted,
+            retraction_reason: Some(reason.to_string()),
+            ..current
+        };
+
+        let affected = store.transaction(|| {
             store.retract_assertion(assertion_id, reason)?;
             Changelog::append(store, ChangelogAction::Retract, assertion_id, reason)?;
 
@@ -87,14 +94,12 @@ impl CascadeResult {
                 }
             }
 
-            let retracted = store
-                .get_assertion(assertion_id)?
-                .ok_or_else(|| anyhow!("assertion disappeared after retract: {assertion_id}"))?;
+            Ok(affected)
+        })?;
 
-            Ok(Self {
-                retracted,
-                affected,
-            })
+        Ok(Self {
+            retracted,
+            affected,
         })
     }
 }

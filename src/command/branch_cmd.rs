@@ -126,7 +126,13 @@ fn merge_branch(
             match apply_item(store, &item) {
                 Ok(true) => applied += 1,
                 Ok(false) => skipped += 1,
-                Err(_) => skipped += 1,
+                Err(e) => {
+                    return Err(e.context(format!(
+                        "merge failed on item [{}] ({})",
+                        applied + skipped,
+                        format::item_label(&item),
+                    )));
+                }
             }
         }
         return Ok(CommandOutput::success(format!(
