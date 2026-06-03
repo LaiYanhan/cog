@@ -47,7 +47,7 @@ mod tests {
             &login.id,
             AssertionKind::Contract,
             "returns option token",
-            "code:src/auth.rs:10",
+            "code:auth::login",
             None,
         )?;
 

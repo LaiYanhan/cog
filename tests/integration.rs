@@ -58,7 +58,7 @@ fn full_cli_workflow_happy_path() {
             "--claim",
             "returns token",
             "--grounds",
-            "code:src/auth.rs:10",
+            "code:auth::login",
         ],
     );
     let base_id = parse_assertion_id(&base_assert);
@@ -127,7 +127,7 @@ fn verify_reports_dependency_on_retracted() {
             "--claim",
             "root assumption",
             "--grounds",
-            "code:src/auth.rs:1",
+            "code:auth::login",
         ],
     );
     let base_id = parse_assertion_id(&base_output);
@@ -178,7 +178,7 @@ fn branch_create_diff_merge_workflow() {
             "--claim",
             "returns token",
             "--grounds",
-            "code:src/auth.rs:1",
+            "code:auth::login",
         ],
     );
 
@@ -205,7 +205,7 @@ fn branch_create_diff_merge_workflow() {
             "--claim",
             "clears session",
             "--grounds",
-            "code:src/auth.rs:50",
+            "code:auth::logout",
         ],
     );
 

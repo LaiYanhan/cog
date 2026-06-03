@@ -79,7 +79,7 @@ mod tests {
             "auth::login",
             AssertionKind::Contract,
             "returns token on success",
-            "code:src/auth.rs:10",
+            "code:auth::login",
             None,
         )?;
 

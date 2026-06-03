@@ -84,7 +84,7 @@ mod tests {
             &entity.id,
             AssertionKind::Contract,
             "returns token",
-            "code:src/auth.rs:1",
+            "code:auth::login",
             None,
         )?;
 
@@ -105,7 +105,7 @@ mod tests {
             &entity.id,
             AssertionKind::Contract,
             "returns token",
-            "code:src/auth.rs:1",
+            "code:auth::login",
             None,
         )?;
 

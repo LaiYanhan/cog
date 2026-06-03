@@ -27,7 +27,7 @@ mod tests {
             &entity.id,
             AssertionKind::Contract,
             "returns token",
-            "code:src/auth.rs:5",
+            "code:auth::login",
             None,
         )?;
 
