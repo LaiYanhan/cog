@@ -4,11 +4,14 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::command::{self, CommandOutput};
-use crate::model::{AssertionKind, BranchManager, EntityRelationKind, ExportFormat, Store};
+use crate::model::{
+    AssertionKind, BranchManager, EntityKind, EntityOrigin, EntityRelationKind, ExportFormat, Store,
+};
 
 #[derive(Debug, Parser)]
-#[command(name = "cog", about = "Cognitive model for coding agents")]
+#[command(name = "cog", about = "Cognitive model for coding agents", version)]
 pub struct Cli {
+    /// Path to the cognitive model database
     #[arg(long, env = "COG_DB")]
     db: Option<PathBuf>,
 
@@ -17,44 +20,77 @@ pub struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Commands {
+    /// Show assertions and relations for an entity
     Query {
+        /// Entity qualified name (e.g. auth::login)
         entity: String,
+        /// Show all assertions including retracted
         #[arg(long)]
         all: bool,
     },
+    /// Trace downstream impact of retracting an entity or assertion
     Impact {
+        /// Entity qualified name (e.g. auth::login)
         entity: String,
     },
+    /// Trace dependency chain leading to an entity
     Trace {
-        /// entity qualified name，如 auth::login
+        /// Entity qualified name (e.g. auth::login)
         entity: String,
     },
-    Index,
+    /// List all entities in the model
+    Index {
+        /// Filter by entity kind (module, function, type, field, method)
+        #[arg(long)]
+        kind: Option<EntityKind>,
+        /// Filter by origin (manual, scan)
+        #[arg(long)]
+        origin: Option<EntityOrigin>,
+        /// Filter by qualified name prefix (e.g. "auth::")
+        #[arg(long)]
+        prefix: Option<String>,
+    },
+    /// Record a knowledge claim (assertion) about an entity
     Assert {
+        /// Entity qualified name (e.g. auth::login)
         entity: String,
+        /// Kind of assertion
         #[arg(long)]
         kind: AssertionKind,
+        /// The knowledge claim in natural language
         #[arg(long)]
         claim: String,
+        /// Evidence or reasoning supporting this claim
         #[arg(long)]
         grounds: String,
+        /// ID of another assertion this depends on
         #[arg(long)]
         depends_on: Option<String>,
     },
+    /// Retract (deprecate) an assertion by ID
     Retract {
+        /// Short or full assertion ID to retract
         id: String,
+        /// Reason for retraction
         #[arg(long)]
         reason: String,
     },
+    /// Record a structural relationship between two entities
     Depend {
+        /// Source entity qualified name
         entity_a: String,
+        /// Target entity qualified name
         #[arg(long)]
         on: String,
+        /// Kind of relationship
         #[arg(long)]
         kind: EntityRelationKind,
     },
+    /// Check structural consistency of the model
     Verify {
+        /// Restrict checks to entities matching this prefix
         #[arg(long)]
         scope: Option<String>,
         /// Auto-delete isolated entities found during verification
@@ -67,19 +103,25 @@ pub enum Commands {
         #[arg(long)]
         scan_path: Option<PathBuf>,
     },
+    /// Export the model to a file
     Export {
+        /// Output format
         #[arg(long, default_value = "json")]
         format: ExportFormat,
     },
+    /// Show model statistics
     Stats,
+    /// Delete an entity and all its assertions, evidence, and relations
     DeleteEntity {
-        /// Qualified entity name to delete (cascades to assertions, evidence, relations)
+        /// Entity qualified name to delete (cascades to assertions, evidence, relations)
         entity: String,
     },
+    /// Manage model branches for speculative changes
     Branch {
         #[command(subcommand)]
         action: BranchAction,
     },
+    /// Scan a codebase and populate the model with structural entities
     Init {
         /// Path to scan (defaults to current directory)
         path: Option<PathBuf>,
@@ -97,29 +139,44 @@ pub enum Commands {
 
 #[derive(Debug, Subcommand)]
 pub enum BranchAction {
+    /// Create a new branch for speculative changes
     Create {
+        /// Branch name (auto-generated if omitted)
         #[arg(long)]
         name: Option<String>,
     },
+    /// List all branches
     List,
+    /// Switch to a branch
     Switch {
+        /// Branch name
         name: String,
     },
+    /// Compare a branch against main
     Diff {
+        /// Branch name
         name: String,
+        /// Show detail for a specific diff item (1-indexed)
         #[arg(long)]
         item: Option<usize>,
     },
+    /// Merge a branch back into main
     Merge {
+        /// Branch name
         name: String,
+        /// Apply a specific diff item by index
         #[arg(long)]
         apply: Option<usize>,
+        /// Reject a specific diff item by index
         #[arg(long)]
         reject: Option<usize>,
+        /// Apply all remaining diff items
         #[arg(long)]
         apply_all: bool,
     },
+    /// Delete a branch
     Drop {
+        /// Branch name
         name: String,
     },
 }
@@ -136,7 +193,9 @@ impl Cli {
             Commands::Query { entity, all } => command::query::execute(store, entity, *all),
             Commands::Impact { entity } => command::impact::execute(store, entity),
             Commands::Trace { entity } => command::trace::execute(store, entity),
-            Commands::Index => command::index_cmd::execute(store),
+            Commands::Index { kind, origin, prefix } => {
+                command::index_cmd::execute(store, *kind, *origin, prefix.as_deref())
+            }
             Commands::Assert {
                 entity,
                 kind,

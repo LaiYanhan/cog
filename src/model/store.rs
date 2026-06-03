@@ -287,27 +287,51 @@ impl Store {
         Ok(entities)
     }
 
-    pub fn list_entities_with_counts(&self) -> Result<Vec<(Entity, usize)>> {
+    /// List entities with assertion counts, optionally filtered by kind, origin, and/or name prefix.
+    pub fn list_entities_filtered(
+        &self,
+        kind: Option<EntityKind>,
+        origin: Option<EntityOrigin>,
+        prefix: Option<&str>,
+    ) -> Result<Vec<(Entity, usize)>> {
+        let mut sql = String::from(
+            "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at, \
+             COUNT(a.id) AS assertion_count \
+             FROM entities e \
+             LEFT JOIN assertions a ON a.entity_id = e.id AND a.status = 'active'",
+        );
+        let mut clauses: Vec<String> = Vec::new();
+        let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(k) = kind {
+            clauses.push("e.kind = ?".into());
+            p.push(Box::new(k.to_string()));
+        }
+        if let Some(o) = origin {
+            clauses.push("e.origin = ?".into());
+            p.push(Box::new(o.to_string()));
+        }
+        if let Some(px) = prefix {
+            clauses.push("e.qualified_name LIKE ?".into());
+            p.push(Box::new(format!("{}%", px)));
+        }
+        if !clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&clauses.join(" AND "));
+        }
+        sql.push_str(" GROUP BY e.id ORDER BY assertion_count DESC, e.qualified_name");
+
+        let refs: Vec<&dyn rusqlite::types::ToSql> = p.iter().map(|x| x.as_ref()).collect();
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at, \
-                 COUNT(a.id) AS assertion_count \
-                 FROM entities e \
-                 LEFT JOIN assertions a ON a.entity_id = e.id AND a.status = 'active' \
-                 GROUP BY e.id \
-                 ORDER BY assertion_count DESC, e.qualified_name",
-            )
-            .context("failed to prepare list_entities_with_counts statement")?;
-
+            .prepare(&sql)
+            .context("failed to prepare filtered entity list")?;
         let mut rows = stmt
-            .query([])
-            .context("failed to query entities with counts")?;
+            .query(refs.as_slice())
+            .context("failed to query filtered entities")?;
+
         let mut result = Vec::new();
-        while let Some(row) = rows
-            .next()
-            .context("failed to iterate entities with counts")?
-        {
+        while let Some(row) = rows.next().context("failed to iterate filtered entities")? {
             let entity = map_entity_row(
                 row.get(0)?,
                 row.get(1)?,
@@ -318,7 +342,6 @@ impl Store {
             let count: usize = row.get::<_, i64>(5)? as usize;
             result.push((entity, count));
         }
-
         Ok(result)
     }
 
