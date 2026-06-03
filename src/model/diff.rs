@@ -39,60 +39,6 @@ pub enum DiffItem {
     AssertionRelationRemoved(AssertionRelation),
 }
 
-#[allow(dead_code)]
-pub enum DiffCategory {
-    Entity,
-    Assertion,
-    Evidence,
-    EntityRelation,
-    AssertionRelation,
-}
-
-#[allow(dead_code)]
-impl DiffItem {
-    pub fn category(&self) -> DiffCategory {
-        match self {
-            DiffItem::EntityAdded(_) | DiffItem::EntityRemoved(_) => DiffCategory::Entity,
-            DiffItem::AssertionAdded(_)
-            | DiffItem::AssertionRemoved(_)
-            | DiffItem::AssertionChanged(_) => DiffCategory::Assertion,
-            DiffItem::EvidenceAdded(_) | DiffItem::EvidenceRemoved(_) => DiffCategory::Evidence,
-            DiffItem::EntityRelationAdded(_) | DiffItem::EntityRelationRemoved(_) => {
-                DiffCategory::EntityRelation
-            }
-            DiffItem::AssertionRelationAdded(_) | DiffItem::AssertionRelationRemoved(_) => {
-                DiffCategory::AssertionRelation
-            }
-        }
-    }
-
-    pub fn is_addition(&self) -> bool {
-        matches!(
-            self,
-            DiffItem::EntityAdded(_)
-                | DiffItem::AssertionAdded(_)
-                | DiffItem::EvidenceAdded(_)
-                | DiffItem::EntityRelationAdded(_)
-                | DiffItem::AssertionRelationAdded(_)
-        )
-    }
-
-    pub fn is_removal(&self) -> bool {
-        matches!(
-            self,
-            DiffItem::EntityRemoved(_)
-                | DiffItem::AssertionRemoved(_)
-                | DiffItem::EvidenceRemoved(_)
-                | DiffItem::EntityRelationRemoved(_)
-                | DiffItem::AssertionRelationRemoved(_)
-        )
-    }
-
-    pub fn is_modification(&self) -> bool {
-        matches!(self, DiffItem::AssertionChanged(_))
-    }
-}
-
 impl ModelDiff {
     pub fn diff(base: &ModelSnapshot, branch: &ModelSnapshot) -> Self {
         let entity_adds = diff_vec_by_id(&base.entities, &branch.entities);
@@ -305,7 +251,7 @@ fn diff_modified_assertions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{AssertionKind, AssertionStatus, EntityKind};
+    use crate::model::{AssertionKind, AssertionStatus, EntityKind, EntityOrigin};
     use chrono::Utc;
 
     fn make_entity(name: &str) -> Entity {
@@ -313,6 +259,7 @@ mod tests {
             id: uuid::Uuid::new_v4().to_string(),
             qualified_name: name.to_string(),
             kind: EntityKind::Function,
+            origin: EntityOrigin::Manual,
             created_at: Utc::now(),
         }
     }

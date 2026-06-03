@@ -221,13 +221,16 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{CascadeReason, CascadeResult, ImpactResult, TraceResult};
-    use crate::model::{AssertionKind, AssertionStatus, EntityKind, EntityRelationKind, Store};
+    use crate::model::{
+        AssertionKind, AssertionStatus, EntityKind, EntityOrigin, EntityRelationKind, Store,
+    };
 
     #[test]
     fn retract_cascades_uncertain_status() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
-        let entity = store.upsert_entity("auth::login", EntityKind::Function)?;
+        let entity =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
 
         let root = store.create_assertion(
             &entity.id,
@@ -266,7 +269,8 @@ mod tests {
     fn retract_keeps_dependent_with_other_support() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
-        let entity = store.upsert_entity("auth::login", EntityKind::Function)?;
+        let entity =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
 
         let a = store.create_assertion(&entity.id, AssertionKind::Contract, "a", "note:a", None)?;
         let b = store.create_assertion(&entity.id, AssertionKind::Contract, "b", "note:b", None)?;
@@ -300,9 +304,9 @@ mod tests {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
 
-        let a = store.upsert_entity("A", EntityKind::Module)?;
-        let b = store.upsert_entity("B", EntityKind::Module)?;
-        let c = store.upsert_entity("C", EntityKind::Module)?;
+        let a = store.upsert_entity("A", EntityKind::Module, EntityOrigin::Manual)?;
+        let b = store.upsert_entity("B", EntityKind::Module, EntityOrigin::Manual)?;
+        let c = store.upsert_entity("C", EntityKind::Module, EntityOrigin::Manual)?;
         store.add_entity_relation(&a.id, &b.id, EntityRelationKind::Contains)?;
         store.add_entity_relation(&b.id, &c.id, EntityRelationKind::Contains)?;
         store.create_assertion(&a.id, AssertionKind::Contract, "a", "note:a", None)?;
@@ -319,7 +323,8 @@ mod tests {
     fn trace_builds_dependency_tree() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
-        let entity = store.upsert_entity("auth::login", EntityKind::Function)?;
+        let entity =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
 
         let root = store.create_assertion(
             &entity.id,

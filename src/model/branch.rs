@@ -10,10 +10,8 @@ const BRANCHES_DIR: &str = "branches";
 const MAIN_BACKUP: &str = "_main_backup";
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct BranchInfo {
     pub name: String,
-    pub path: PathBuf,
     pub size_bytes: u64,
     pub modified: Option<DateTime<Utc>>,
 }
@@ -135,12 +133,6 @@ impl BranchManager {
         self.branches_dir.join(format!("{name}.db"))
     }
 
-    #[allow(dead_code)]
-    pub fn is_on_branch(&self) -> Result<bool> {
-        let backup = self.branch_path(MAIN_BACKUP);
-        Ok(backup.exists())
-    }
-
     pub fn switch_to_branch(&self, name: &str) -> Result<()> {
         let branch_path = self.branch_path(name);
         if !branch_path.exists() {
@@ -199,7 +191,6 @@ impl BranchManager {
 
         Ok(BranchInfo {
             name: name.to_string(),
-            path: path.to_path_buf(),
             size_bytes: metadata.len(),
             modified,
         })

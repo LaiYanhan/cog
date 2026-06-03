@@ -72,13 +72,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, EntityKind, ExportFormat, Store};
+    use crate::model::{AssertionKind, EntityKind, EntityOrigin, ExportFormat, Store};
 
     #[test]
     fn exports_json_snapshot() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
-        let entity = store.upsert_entity("auth::login", EntityKind::Function)?;
+        let entity =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         store.create_assertion(
             &entity.id,
             AssertionKind::Contract,
@@ -98,7 +99,8 @@ mod tests {
     fn exports_dot_snapshot() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
-        let entity = store.upsert_entity("auth::login", EntityKind::Function)?;
+        let entity =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         store.create_assertion(
             &entity.id,
             AssertionKind::Contract,

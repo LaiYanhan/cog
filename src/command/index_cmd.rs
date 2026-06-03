@@ -17,13 +17,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{EntityKind, Store};
+    use crate::model::{EntityKind, EntityOrigin, Store};
 
     #[test]
     fn lists_entities() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
-        store.upsert_entity("auth", EntityKind::Module)?;
+        store.upsert_entity("auth", EntityKind::Module, EntityOrigin::Manual)?;
 
         let output = execute(&store)?;
         assert_eq!(output.exit_code, 0);

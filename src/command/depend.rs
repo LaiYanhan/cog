@@ -9,8 +9,16 @@ pub fn execute(
     entity_b: &str,
     kind: EntityRelationKind,
 ) -> Result<CommandOutput> {
-    let left = store.upsert_entity(entity_a, infer_entity_kind(entity_a))?;
-    let right = store.upsert_entity(entity_b, infer_entity_kind(entity_b))?;
+    let left = store.upsert_entity(
+        entity_a,
+        infer_entity_kind(entity_a),
+        crate::model::EntityOrigin::Manual,
+    )?;
+    let right = store.upsert_entity(
+        entity_b,
+        infer_entity_kind(entity_b),
+        crate::model::EntityOrigin::Manual,
+    )?;
 
     store.add_entity_relation(&left.id, &right.id, kind)?;
     Changelog::append(

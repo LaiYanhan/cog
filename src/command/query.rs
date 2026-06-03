@@ -32,15 +32,16 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, EntityKind, EntityRelationKind, Store};
+    use crate::model::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind, Store};
 
     #[test]
     fn returns_assertions_and_related_entities() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
 
-        let login = store.upsert_entity("auth::login", EntityKind::Function)?;
-        let token = store.upsert_entity("AuthToken", EntityKind::Type)?;
+        let login =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
+        let token = store.upsert_entity("AuthToken", EntityKind::Type, EntityOrigin::Manual)?;
         store.add_entity_relation(&login.id, &token.id, EntityRelationKind::Uses)?;
         store.create_assertion(
             &login.id,

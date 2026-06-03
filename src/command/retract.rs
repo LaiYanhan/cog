@@ -16,13 +16,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, EntityKind, Store};
+    use crate::model::{AssertionKind, EntityKind, EntityOrigin, Store};
 
     #[test]
     fn retracts_and_reports_affected_assertions() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
-        let entity = store.upsert_entity("auth::login", EntityKind::Function)?;
+        let entity =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         let base = store.create_assertion(
             &entity.id,
             AssertionKind::Contract,

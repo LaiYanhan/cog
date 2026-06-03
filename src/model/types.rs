@@ -10,7 +10,37 @@ pub struct Entity {
     pub id: String,
     pub qualified_name: String,
     pub kind: EntityKind,
+    pub origin: EntityOrigin,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityOrigin {
+    #[default]
+    Manual,
+    Scan,
+}
+
+impl Display for EntityOrigin {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Manual => "manual",
+            Self::Scan => "scan",
+        })
+    }
+}
+
+impl FromStr for EntityOrigin {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "manual" => Ok(Self::Manual),
+            "scan" => Ok(Self::Scan),
+            _ => Err("invalid entity origin"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]

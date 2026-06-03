@@ -24,7 +24,11 @@ pub fn execute(
         }
     }
 
-    let entity_record = store.upsert_entity(entity, infer_entity_kind(entity))?;
+    let entity_record = store.upsert_entity(
+        entity,
+        infer_entity_kind(entity),
+        crate::model::EntityOrigin::Manual,
+    )?;
     let assertion = store.create_assertion(
         &entity_record.id,
         kind,

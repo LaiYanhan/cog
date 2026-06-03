@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use crate::model::types::{
     Assertion, AssertionKind, AssertionRelation, AssertionRelationKind, AssertionStatus,
-    ChangelogAction, ChangelogEntry, Entity, EntityKind, EntityRelation, EntityRelationKind,
-    Evidence, ModelSnapshot, ModelStats, RelatedEntity, RelationDirection,
+    ChangelogAction, ChangelogEntry, Entity, EntityKind, EntityOrigin, EntityRelation,
+    EntityRelationKind, Evidence, ModelSnapshot, ModelStats, RelatedEntity, RelationDirection,
 };
 
 const SCHEMA: &str = r#"
@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS entities (
     id TEXT PRIMARY KEY,
     qualified_name TEXT UNIQUE NOT NULL,
     kind TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT 'manual',
     created_at TEXT NOT NULL
 );
 
@@ -93,6 +94,21 @@ impl Store {
         conn.execute_batch(SCHEMA)
             .context("failed to initialize sqlite schema")?;
 
+        // Migration: add origin column if upgrading from a pre-origin schema
+        let has_origin: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('entities') WHERE name = 'origin'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !has_origin {
+            conn.execute_batch(
+                "ALTER TABLE entities ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'",
+            )
+            .context("failed to migrate entities table: add origin column")?;
+        }
+
         Ok(Self { conn })
     }
 
@@ -126,7 +142,12 @@ impl Store {
         Ok(())
     }
 
-    pub fn upsert_entity(&self, qualified_name: &str, kind: EntityKind) -> Result<Entity> {
+    pub fn upsert_entity(
+        &self,
+        qualified_name: &str,
+        kind: EntityKind,
+        origin: EntityOrigin,
+    ) -> Result<Entity> {
         if let Some(entity) = self.get_entity_by_name(qualified_name)? {
             return Ok(entity);
         }
@@ -135,16 +156,18 @@ impl Store {
             id: Uuid::new_v4().to_string(),
             qualified_name: qualified_name.to_string(),
             kind,
+            origin,
             created_at: Utc::now(),
         };
 
         self.conn
             .execute(
-                "INSERT INTO entities (id, qualified_name, kind, created_at) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO entities (id, qualified_name, kind, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     entity.id,
                     entity.qualified_name,
                     entity.kind.to_string(),
+                    entity.origin.to_string(),
                     to_ts(entity.created_at)
                 ],
             )
@@ -161,11 +184,12 @@ impl Store {
         }
         self.conn
             .execute(
-                "INSERT INTO entities (id, qualified_name, kind, created_at) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO entities (id, qualified_name, kind, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     entity.id,
                     entity.qualified_name,
                     entity.kind.to_string(),
+                    entity.origin.to_string(),
                     to_ts(entity.created_at)
                 ],
             )
@@ -203,38 +227,40 @@ impl Store {
     pub fn get_entity(&self, id: &str) -> Result<Option<Entity>> {
         self.conn
             .query_row(
-                "SELECT id, qualified_name, kind, created_at FROM entities WHERE id = ?1",
+                "SELECT id, qualified_name, kind, origin, created_at FROM entities WHERE id = ?1",
                 params![id],
                 |row| {
                     let id: String = row.get(0)?;
                     let qualified_name: String = row.get(1)?;
                     let kind: String = row.get(2)?;
-                    let created_at: String = row.get(3)?;
-                    Ok((id, qualified_name, kind, created_at))
+                    let origin: String = row.get(3)?;
+                    let created_at: String = row.get(4)?;
+                    Ok((id, qualified_name, kind, origin, created_at))
                 },
             )
             .optional()
             .context("failed to fetch entity by id")?
-            .map(|row| map_entity_row(row.0, row.1, row.2, row.3))
+            .map(|row| map_entity_row(row.0, row.1, row.2, row.3, row.4))
             .transpose()
     }
 
     pub fn get_entity_by_name(&self, name: &str) -> Result<Option<Entity>> {
         self.conn
             .query_row(
-                "SELECT id, qualified_name, kind, created_at FROM entities WHERE qualified_name = ?1",
+                "SELECT id, qualified_name, kind, origin, created_at FROM entities WHERE qualified_name = ?1",
                 params![name],
                 |row| {
                     let id: String = row.get(0)?;
                     let qualified_name: String = row.get(1)?;
                     let kind: String = row.get(2)?;
-                    let created_at: String = row.get(3)?;
-                    Ok((id, qualified_name, kind, created_at))
+                    let origin: String = row.get(3)?;
+                    let created_at: String = row.get(4)?;
+                    Ok((id, qualified_name, kind, origin, created_at))
                 },
             )
             .optional()
             .context("failed to fetch entity by name")?
-            .map(|row| map_entity_row(row.0, row.1, row.2, row.3))
+            .map(|row| map_entity_row(row.0, row.1, row.2, row.3, row.4))
             .transpose()
     }
 
@@ -242,7 +268,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, qualified_name, kind, created_at FROM entities ORDER BY qualified_name",
+                "SELECT id, qualified_name, kind, origin, created_at FROM entities ORDER BY qualified_name",
             )
             .context("failed to prepare list_entities statement")?;
 
@@ -254,6 +280,7 @@ impl Store {
                 row.get(1)?,
                 row.get(2)?,
                 row.get(3)?,
+                row.get(4)?,
             )?);
         }
 
@@ -264,7 +291,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT e.id, e.qualified_name, e.kind, e.created_at, \
+                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at, \
                  COUNT(a.id) AS assertion_count \
                  FROM entities e \
                  LEFT JOIN assertions a ON a.entity_id = e.id AND a.status = 'active' \
@@ -281,8 +308,14 @@ impl Store {
             .next()
             .context("failed to iterate entities with counts")?
         {
-            let entity = map_entity_row(row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)?;
-            let count: usize = row.get::<_, i64>(4)? as usize;
+            let entity = map_entity_row(
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            )?;
+            let count: usize = row.get::<_, i64>(5)? as usize;
             result.push((entity, count));
         }
 
@@ -715,7 +748,7 @@ impl Store {
         let mut out_stmt = self
             .conn
             .prepare(
-                "SELECT e.id, e.qualified_name, e.kind, e.created_at, r.kind
+                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at, r.kind
                  FROM entity_relations r
                  JOIN entities e ON e.id = r.to_entity
                  WHERE r.from_entity = ?1",
@@ -728,9 +761,15 @@ impl Store {
             .next()
             .context("failed to iterate outgoing entities")?
         {
-            let relation_kind: String = row.get(4)?;
+            let relation_kind: String = row.get(5)?;
             related.push(RelatedEntity {
-                entity: map_entity_row(row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)?,
+                entity: map_entity_row(
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                )?,
                 kind: EntityRelationKind::from_str(&relation_kind)
                     .map_err(|_| anyhow!("invalid entity relation kind in db: {relation_kind}"))?,
                 direction: RelationDirection::Outgoing,
@@ -740,7 +779,7 @@ impl Store {
         let mut in_stmt = self
             .conn
             .prepare(
-                "SELECT e.id, e.qualified_name, e.kind, e.created_at, r.kind
+                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at, r.kind
                  FROM entity_relations r
                  JOIN entities e ON e.id = r.from_entity
                  WHERE r.to_entity = ?1",
@@ -753,9 +792,15 @@ impl Store {
             .next()
             .context("failed to iterate incoming entities")?
         {
-            let relation_kind: String = row.get(4)?;
+            let relation_kind: String = row.get(5)?;
             related.push(RelatedEntity {
-                entity: map_entity_row(row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)?,
+                entity: map_entity_row(
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                )?,
                 kind: EntityRelationKind::from_str(&relation_kind)
                     .map_err(|_| anyhow!("invalid entity relation kind in db: {relation_kind}"))?,
                 direction: RelationDirection::Incoming,
@@ -771,7 +816,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT e.id, e.qualified_name, e.kind, e.created_at
+                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at
                  FROM entity_relations r
                  JOIN entities e ON e.id = CASE
                      WHEN r.kind = 'contains' THEN r.to_entity
@@ -795,9 +840,35 @@ impl Store {
                 row.get(1)?,
                 row.get(2)?,
                 row.get(3)?,
+                row.get(4)?,
             )?);
         }
         Ok(entities)
+    }
+
+    /// Returns the qualified names of all entities that were created by automated scanning
+    /// (origin = "scan"). Used by verify --scan to detect stale entities.
+    pub fn get_scanned_entity_names(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT qualified_name FROM entities WHERE origin = 'scan' ORDER BY qualified_name",
+            )
+            .context("failed to prepare get_scanned_entity_names statement")?;
+
+        let mut rows = stmt
+            .query([])
+            .context("failed to query scanned entity names")?;
+
+        let mut names = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .context("failed to iterate scanned entity names")?
+        {
+            names.push(row.get(0)?);
+        }
+
+        Ok(names)
     }
 
     pub fn get_assertions_for_entities(&self, entity_ids: &[String]) -> Result<Vec<Assertion>> {
@@ -1042,6 +1113,7 @@ fn map_entity_row(
     id: String,
     qualified_name: String,
     kind: String,
+    origin: String,
     created_at: String,
 ) -> Result<Entity> {
     Ok(Entity {
@@ -1049,6 +1121,8 @@ fn map_entity_row(
         qualified_name,
         kind: EntityKind::from_str(&kind)
             .map_err(|_| anyhow!("invalid entity kind in db: {kind}"))?,
+        origin: EntityOrigin::from_str(&origin)
+            .map_err(|_| anyhow!("invalid entity origin in db: {origin}"))?,
         created_at: parse_ts(&created_at)?,
     })
 }
@@ -1110,7 +1184,8 @@ mod tests {
         let db_path = tmp.path().join("cog.db");
         let store = Store::open(&db_path)?;
 
-        let created = store.upsert_entity("auth::login", EntityKind::Function)?;
+        let created =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         let fetched = store
             .get_entity_by_name("auth::login")?
             .ok_or_else(|| anyhow!("missing entity"))?;
@@ -1126,7 +1201,8 @@ mod tests {
         let db_path = tmp.path().join("cog.db");
         let store = Store::open(&db_path)?;
 
-        let entity = store.upsert_entity("auth::login", EntityKind::Function)?;
+        let entity =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         let base = store.create_assertion(
             &entity.id,
             AssertionKind::Contract,

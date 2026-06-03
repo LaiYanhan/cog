@@ -15,14 +15,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, EntityKind, EntityRelationKind, Store};
+    use crate::model::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind, Store};
 
     #[test]
     fn reports_downstream_impact() -> Result<()> {
         let tmp = tempdir()?;
         let store = Store::open(&tmp.path().join("cog.db"))?;
-        let a = store.upsert_entity("A", EntityKind::Module)?;
-        let b = store.upsert_entity("B", EntityKind::Module)?;
+        let a = store.upsert_entity("A", EntityKind::Module, EntityOrigin::Manual)?;
+        let b = store.upsert_entity("B", EntityKind::Module, EntityOrigin::Manual)?;
         store.add_entity_relation(&a.id, &b.id, EntityRelationKind::Contains)?;
         store.create_assertion(&a.id, AssertionKind::Contract, "a", "note:a", None)?;
 
