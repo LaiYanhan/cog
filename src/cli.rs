@@ -193,9 +193,11 @@ impl Cli {
             Commands::Query { entity, all } => command::query::execute(store, entity, *all),
             Commands::Impact { entity } => command::impact::execute(store, entity),
             Commands::Trace { entity } => command::trace::execute(store, entity),
-            Commands::Index { kind, origin, prefix } => {
-                command::index_cmd::execute(store, *kind, *origin, prefix.as_deref())
-            }
+            Commands::Index {
+                kind,
+                origin,
+                prefix,
+            } => command::index_cmd::execute(store, *kind, *origin, prefix.as_deref()),
             Commands::Assert {
                 entity,
                 kind,
