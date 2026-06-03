@@ -61,14 +61,28 @@ pub fn execute(
                 continue;
             }
 
-            let evidence_count = store.count_evidence_for_assertion(&assertion.id)?;
-            if evidence_count == 0 {
+            let evidence = store.get_evidence_for_assertion(&assertion.id)?;
+            if evidence.is_empty() {
                 issues.push(VerificationIssue {
                     kind: VerificationIssueKind::MissingEvidence,
                     entity_name: Some(entity.qualified_name.clone()),
                     assertion_id: Some(assertion.id.clone()),
                     detail: "active assertion has no evidence".to_string(),
                 });
+            }
+
+            for ev in &evidence {
+                if ev.source == "code" && !all_model_names.contains(ev.detail.as_str()) {
+                    issues.push(VerificationIssue {
+                        kind: VerificationIssueKind::DanglingGrounds,
+                        entity_name: Some(entity.qualified_name.clone()),
+                        assertion_id: Some(assertion.id.clone()),
+                        detail: format!(
+                            "grounds \"code:{}\" references entity not in model",
+                            ev.detail
+                        ),
+                    });
+                }
             }
 
             for dependency in store.get_dependencies(&assertion.id)? {
@@ -198,7 +212,7 @@ pub fn execute(
     // - Any stale entity → failure (model is out of sync with code)
     if success && (!has_scan_diff || (unmodeled_count > 0 && stale_count == 0)) {
         let mut msg = format!(
-            "verify: ok (checked {} entities: isolated, missing evidence, dangling dependencies{})",
+            "verify: ok (checked {} entities: isolated, missing evidence, dangling dependencies, dangling grounds{})",
             checked_count, clean_note,
         );
         if unmodeled_count > 0 {
@@ -289,7 +303,7 @@ mod tests {
 
     use super::execute;
     use crate::command::init_cmd;
-    use crate::model::{AssertionKind, EntityKind, EntityOrigin, Store};
+    use crate::model::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind, Store};
 
     #[test]
     fn reports_isolated_entity_issue() -> Result<()> {
@@ -313,7 +327,7 @@ mod tests {
             &entity.id,
             AssertionKind::Contract,
             "returns token",
-            "code:src/auth.rs:1",
+            "code:auth::login",
             None,
         )?;
 
@@ -426,6 +440,58 @@ mod tests {
             output.text
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn reports_dangling_grounds_when_entity_missing() -> Result<()> {
+        let tmp = tempdir()?;
+        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let entity =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
+        store.create_assertion(
+            &entity.id,
+            AssertionKind::Contract,
+            "delegates to validate_credentials",
+            "code:auth::validate_credentials",
+            None,
+        )?;
+
+        // auth::validate_credentials does NOT exist in the model → dangling grounds
+        let output = execute(&store, None, false, None)?;
+        assert_eq!(output.exit_code, 1);
+        assert!(output.text.contains("DanglingGrounds"));
+        assert!(
+            output.text.contains("auth::validate_credentials"),
+            "should name the missing entity: {}",
+            output.text
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn passes_when_code_grounds_reference_existing_entity() -> Result<()> {
+        let tmp = tempdir()?;
+        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let login =
+            store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
+        let validate = store.upsert_entity(
+            "auth::validate_credentials",
+            EntityKind::Function,
+            EntityOrigin::Manual,
+        )?;
+        store.add_entity_relation(&login.id, &validate.id, EntityRelationKind::Calls)?;
+        store.create_assertion(
+            &login.id,
+            AssertionKind::Contract,
+            "delegates to validate_credentials",
+            "code:auth::validate_credentials",
+            None,
+        )?;
+
+        let output = execute(&store, None, false, None)?;
+        assert!(output.text.contains("verify: ok"));
+        assert_eq!(output.exit_code, 0);
         Ok(())
     }
 }

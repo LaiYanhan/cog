@@ -948,17 +948,6 @@ impl Store {
         Ok(())
     }
 
-    pub fn count_evidence_for_assertion(&self, assertion_id: &str) -> Result<u64> {
-        let count: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM evidences WHERE assertion_id = ?1",
-                params![assertion_id],
-                |row| row.get(0),
-            )
-            .context("failed to count evidence")?;
-        Ok(count as u64)
-    }
 
     pub fn count_relations_for_entity(&self, entity_id: &str) -> Result<u64> {
         let count: i64 = self
@@ -1230,7 +1219,7 @@ mod tests {
             &entity.id,
             AssertionKind::Contract,
             "returns option token",
-            "code:src/auth.rs:10",
+            "code:auth::login",
             None,
         )?;
 

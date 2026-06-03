@@ -330,6 +330,7 @@ pub enum VerificationIssueKind {
     MissingEvidence,
     DependencyOnRetracted,
     DependencyOnUncertain,
+    DanglingGrounds,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
