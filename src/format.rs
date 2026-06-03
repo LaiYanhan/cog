@@ -241,55 +241,24 @@ pub fn entity_index_with_counts(entities: &[(Entity, usize)]) -> String {
 pub fn diff_summary(summary: &DiffSummary) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "diff: {} change(s)", summary.total);
-    if summary.entities_added > 0 {
-        let _ = writeln!(out, "  entities: +{}", summary.entities_added);
-    }
-    if summary.entities_removed > 0 {
-        let _ = writeln!(out, "  entities: -{}", summary.entities_removed);
-    }
-    if summary.assertions_added > 0 {
-        let _ = writeln!(out, "  assertions: +{}", summary.assertions_added);
-    }
-    if summary.assertions_removed > 0 {
-        let _ = writeln!(out, "  assertions: -{}", summary.assertions_removed);
-    }
-    if summary.assertions_changed > 0 {
-        let _ = writeln!(out, "  assertions: ~{}", summary.assertions_changed);
-    }
-    if summary.evidences_added > 0 {
-        let _ = writeln!(out, "  evidences: +{}", summary.evidences_added);
-    }
-    if summary.evidences_removed > 0 {
-        let _ = writeln!(out, "  evidences: -{}", summary.evidences_removed);
-    }
-    if summary.entity_relations_added > 0 {
-        let _ = writeln!(
-            out,
-            "  entity_relations: +{}",
-            summary.entity_relations_added
-        );
-    }
-    if summary.entity_relations_removed > 0 {
-        let _ = writeln!(
-            out,
-            "  entity_relations: -{}",
-            summary.entity_relations_removed
-        );
-    }
-    if summary.assertion_relations_added > 0 {
-        let _ = writeln!(
-            out,
-            "  assertion_relations: +{}",
-            summary.assertion_relations_added
-        );
-    }
-    if summary.assertion_relations_removed > 0 {
-        let _ = writeln!(
-            out,
-            "  assertion_relations: -{}",
-            summary.assertion_relations_removed
-        );
-    }
+
+    let mut row = |label: &str, count: usize, sign: &str| {
+        if count > 0 {
+            let _ = writeln!(out, "  {label}: {sign}{count}");
+        }
+    };
+
+    row("entities", summary.entities_added, "+");
+    row("entities", summary.entities_removed, "-");
+    row("assertions", summary.assertions_added, "+");
+    row("assertions", summary.assertions_removed, "-");
+    row("assertions", summary.assertions_changed, "~");
+    row("evidences", summary.evidences_added, "+");
+    row("evidences", summary.evidences_removed, "-");
+    row("entity_relations", summary.entity_relations_added, "+");
+    row("entity_relations", summary.entity_relations_removed, "-");
+    row("assertion_relations", summary.assertion_relations_added, "+");
+    row("assertion_relations", summary.assertion_relations_removed, "-");
     out
 }
 

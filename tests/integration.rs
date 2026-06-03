@@ -33,12 +33,11 @@ fn parse_assertion_id(output: &str) -> String {
         .find_map(|line| line.strip_prefix("- id: "))
         .expect("assert output should contain assertion id");
     // format: "short_id (full_uuid)" — extract the full uuid
-    if let Some(start) = raw.find('(') {
-        if let Some(end) = raw.find(')') {
-            if end > start {
-                return raw[start + 1..end].to_owned();
-            }
-        }
+    if let Some(start) = raw.find('(')
+        && let Some(end) = raw.find(')')
+        && end > start
+    {
+        return raw[start + 1..end].to_owned();
     }
     raw.to_owned()
 }
