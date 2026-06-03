@@ -18,7 +18,7 @@ cog init .
 # Record what you've learned
 cog assert auth::login --kind contract \
     --claim "Returns Ok(token) on valid credentials, Err on invalid" \
-    --grounds "code:src/auth.rs:45-67"
+    --grounds "code:auth::login"
 
 # Query what you know
 cog query auth::login

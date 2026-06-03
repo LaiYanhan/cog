@@ -448,19 +448,19 @@ Agent 收到任务
 Agent 理解代码后:
   → cog assert auth::login --kind Contract \
       --claim "接受 (&str, &str) 用户名密码，返回 Option<Token>"
-      --grounds "code_reading:src/auth.rs:42"
+      --grounds "code:auth::login"
 
   → cog assert auth::login --kind Intent \
       --claim "密码比对使用 constant_time_eq 防止 timing 攻击"
-      --grounds "code_reading:src/auth.rs:47"
+      --grounds "code:auth::login"
 
   → cog assert auth::login --kind Invariant \
       --claim "同一用户连续失败 5 次后锁定账户 15 分钟"
-      --grounds "code_reading:src/auth.rs:50-55"
+      --grounds "code:auth::login"
 
   → cog assert AuthToken --kind Invariant \
       --claim "token 字段构造后为非空字符串"
-      --grounds "code_reading:src/auth.rs:30"
+      --grounds "code:AuthToken"
 
   → cog assert auth::login --kind Contract \
       --claim "返回 None 意味着认证失败"
@@ -485,7 +485,7 @@ Agent 检查代码，发现问题: 并发场景下 Token 生成有竞争条件
   → cog trace --entity auth::login --symptom "成功认证但 Token 为空"
   → 返回依赖链:
     Assertion("token 字段构造后为非空字符串")
-    → grounds: code_reading:src/auth.rs:30
+    → grounds: code:AuthToken
     → 但实际: 并发下 Token::new 可能返回空 token
 
   → cog retract <token_nonempty_id> --reason "并发竞争导致 Token 可能为空"

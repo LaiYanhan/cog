@@ -54,8 +54,11 @@ Use this after test runs to clean up artifacts without manual
 `delete-entity` calls.
 
 ### Grounds should point to current code
-When you refactor, update the grounds of affected assertions. Stale line
-references erode trust in the model. See
+`code:` grounds reference entity qualified names (e.g., `code:auth::login`),
+not file paths with line numbers. These stay stable across line-number changes
+and minor edits. Run `verify --scan` to detect when a referenced entity no
+longer exists in the codebase. Grounds still need updating when entities are
+renamed or significantly restructured. See
 [WORKFLOWS.md — Progressive Grounding Lifecycle](WORKFLOWS.md#progressive-grounding-lifecycle).
 
 ### Check merge reports for skips
@@ -105,7 +108,8 @@ assumption changes, would it cause a hard-to-find bug?"* If no, don't assert.
 
 ### Forgetting to migrate grounds after implementation
 Speculative `plan:...` grounds left in the model after code exists reduce
-confidence. Migrate to `code:...` grounds during the grounding phase.
+confidence. Migrate to `code:<entity>` grounds (e.g., `code:auth::login`)
+during the grounding phase.
 See [Progressive Grounding Lifecycle](WORKFLOWS.md#progressive-grounding-lifecycle).
 
 ---

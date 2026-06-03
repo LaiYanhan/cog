@@ -52,15 +52,15 @@ tree-sitter cannot extract:
 # After reading a function, record what you learned
 cog assert auth::login --kind contract \
   --claim "Returns Ok(token) on valid credentials, Err on invalid" \
-  --grounds "code:src/auth.rs:45-67"
+  --grounds "code:auth::login"
 
 cog assert auth::login --kind invariant \
   --claim "Password is zeroed from memory before returning" \
-  --grounds "code:src/auth.rs:62"
+  --grounds "code:auth::login"
 
 cog assert auth::login --kind fragility \
   --claim "Token expiry not checked on refresh — stale tokens accepted after rotation" \
-  --grounds "code:src/auth.rs:80-85"
+  --grounds "code:auth::login"
 
 # Link entities discovered during reading
 cog depend auth::login --on auth::token::validate --kind calls
@@ -180,7 +180,7 @@ assumptions that implementation proved wrong.
 cog retract <resize_contract_id> --reason "re-grounding to implementation"
 cog assert myapp::core::resize --kind contract \
   --claim "Takes (image, width, height), returns resized image or Err" \
-  --grounds "code:src/core/resize.rs:12-45"
+  --grounds "code:myapp::core::resize"
 
 # Retract a design choice that turned out wrong
 cog retract <lazy_decode_id> --reason "implementation chose eager decode — simpler"
@@ -188,11 +188,11 @@ cog retract <lazy_decode_id> --reason "implementation chose eager decode — sim
 # Assert new knowledge discovered during implementation
 cog assert myapp::core::resize --kind fragility \
   --claim "JPEG EXIF rotation metadata stripped during resize — must preserve orientation" \
-  --grounds "code:src/core/resize.rs:88-92"
+  --grounds "code:myapp::core::resize"
 
 cog assert myapp::core::resize --kind correction \
   --claim "Added orientation preservation in resize pipeline (commit abc1234)" \
-  --grounds "code:src/core/resize.rs:100-115"
+  --grounds "code:myapp::core::resize"
 ```
 
 ### Phase 4: Merge (if using a branch)
@@ -225,12 +225,12 @@ you modify anything.
 # Read a function, assert what it promises
 cog assert auth::login --kind contract \
   --claim "Returns Ok(token) on valid credentials, Err on invalid" \
-  --grounds "code:src/auth.rs:45-67"
+  --grounds "code:auth::login"
 
 # Record a key invariant
 cog assert auth::login --kind invariant \
   --claim "Password is zeroed from memory before returning" \
-  --grounds "code:src/auth.rs:62"
+  --grounds "code:auth::login"
 
 # Link entities you discover
 cog depend auth --on auth::login --kind contains
@@ -262,7 +262,7 @@ cog verify
 # Step 5: Fill gaps before refactoring
 cog assert store::ConnectionPool --kind contract \
   --claim "get() blocks until a connection is available, never returns None" \
-  --grounds "code:src/store/pool.rs:30-55"
+  --grounds "code:store::ConnectionPool"
 ```
 
 ---
@@ -310,7 +310,7 @@ cog assert myapp --kind fragility \
 
 cog assert myapp --kind correction \
   --claim "Added resolve_assertion_id for short ID prefix matching" \
-  --grounds "code:src/model/store.rs:274-298"
+  --grounds "code:cog::model::store"
 ```
 
 ---
@@ -356,17 +356,17 @@ will change during implementation.
 No model changes needed. Code the assertions as a checklist.
 
 ### Grounding phase
-Grounds: `code:src/path.rs:N-M`, `test:path/to/test.rs`
+Grounds: `code:<entity>`, `test:path/to/test.rs`
 
 Replace `plan:...` grounds with `code:...` after writing the real implementation.
 Retract design assumptions that turned out wrong. Assert new knowledge
 discovered during implementation (fragility, corrections).
 
 ### Maintenance phase
-Grounds: `code:src/path.rs:N-M`, `incident:description`, `manual:review`
+Grounds: `code:<entity>`, `incident:description`, `manual:review`
 
-Update grounds when code moves (refactor changes line numbers). Retract
-fragility after fixing the root cause. Assert corrections when fixing bugs.
+Update grounds when entities are renamed or removed (detected by `verify --scan`).
+Retract fragility after fixing the root cause. Assert corrections when fixing bugs.
 
 ### Quick reference
 
@@ -377,7 +377,7 @@ fragility after fixing the root cause. Assert corrections when fixing bugs.
 | `plan:constraints` | Design | Hard limit from requirements |
 | `design:perf-notes` | Design | Performance tradeoff decision |
 | `spec:requirements` | Design | Requirement the code must satisfy |
-| `code:src/foo.rs:N-M` | Ground/Maintain | Evidence from source code |
+| `code:<entity>` | Ground/Maintain | Evidence from a code entity identified by qualified name |
 | `test:path/to/test.rs` | Ground/Maintain | Evidence from passing test |
 | `manual:review` | Any | Human code review finding |
 | `incident:description` | Maintain | Bug or incident post-mortem |
