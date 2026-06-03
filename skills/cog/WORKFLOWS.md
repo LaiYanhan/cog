@@ -3,9 +3,9 @@
 Scenario-based recipes for using cog. Each workflow is a concrete sequence
 of commands — run them, read the output, act on it.
 
- - [Analyzing & Debugging an Existing Codebase](#analyzing--debugging-an-existing-codebase)
- - [Starting a New Project (From Scratch)](#starting-a-new-project-from-scratch)
- - [After Reading Unfamiliar Code (Retrofitting)](#after-reading-unfamiliar-code-retrofitting)
+- [Analyzing & Debugging an Existing Codebase](#analyzing--debugging-an-existing-codebase)
+- [Starting a New Project (From Scratch)](#starting-a-new-project-from-scratch)
+- [After Reading Unfamiliar Code (Retrofitting)](#after-reading-unfamiliar-code-retrofitting)
 - [Before a Risky Refactor](#before-a-risky-refactor)
 - [When You Find a Subtle Trap](#when-you-find-a-subtle-trap)
 - [When Retracting Outdated Knowledge](#when-retracting-outdated-knowledge)
