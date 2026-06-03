@@ -229,18 +229,11 @@ impl Store {
             .query_row(
                 "SELECT id, qualified_name, kind, origin, created_at FROM entities WHERE id = ?1",
                 params![id],
-                |row| {
-                    let id: String = row.get(0)?;
-                    let qualified_name: String = row.get(1)?;
-                    let kind: String = row.get(2)?;
-                    let origin: String = row.get(3)?;
-                    let created_at: String = row.get(4)?;
-                    Ok((id, qualified_name, kind, origin, created_at))
-                },
+                entity_from_query_row,
             )
             .optional()
             .context("failed to fetch entity by id")?
-            .map(|row| map_entity_row(row.0, row.1, row.2, row.3, row.4))
+            .map(|(id, name, kind, origin, ts)| map_entity_row(id, name, kind, origin, ts))
             .transpose()
     }
 
@@ -249,18 +242,11 @@ impl Store {
             .query_row(
                 "SELECT id, qualified_name, kind, origin, created_at FROM entities WHERE qualified_name = ?1",
                 params![name],
-                |row| {
-                    let id: String = row.get(0)?;
-                    let qualified_name: String = row.get(1)?;
-                    let kind: String = row.get(2)?;
-                    let origin: String = row.get(3)?;
-                    let created_at: String = row.get(4)?;
-                    Ok((id, qualified_name, kind, origin, created_at))
-                },
+                entity_from_query_row,
             )
             .optional()
             .context("failed to fetch entity by name")?
-            .map(|row| map_entity_row(row.0, row.1, row.2, row.3, row.4))
+            .map(|(id, name, kind, origin, ts)| map_entity_row(id, name, kind, origin, ts))
             .transpose()
     }
 
@@ -895,11 +881,29 @@ impl Store {
     }
 
     pub fn get_assertions_for_entities(&self, entity_ids: &[String]) -> Result<Vec<Assertion>> {
-        let mut result = Vec::new();
-        for entity_id in entity_ids {
-            result.extend(self.get_assertions_for_entity(entity_id)?);
+        if entity_ids.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok(result)
+        let placeholders: Vec<String> = (0..entity_ids.len()).map(|_| "?".to_string()).collect();
+        let sql = format!(
+            "SELECT id, entity_id, kind, claim, status, created_at, updated_at, retraction_reason \
+             FROM assertions WHERE entity_id IN ({}) ORDER BY created_at",
+            placeholders.join(", ")
+        );
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
+            .context("failed to prepare get_assertions_for_entities statement")?;
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            entity_ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let mut rows = stmt
+            .query(params.as_slice())
+            .context("failed to query assertions by entity ids")?;
+        let mut assertions = Vec::new();
+        while let Some(row) = rows.next().context("failed to iterate assertions")? {
+            assertions.push(map_assertion_row(row)?);
+        }
+        Ok(assertions)
     }
 
     pub fn list_changelog_entries(&self) -> Result<Vec<ChangelogEntry>> {
@@ -962,57 +966,40 @@ impl Store {
     }
 
     pub fn stats(&self) -> Result<ModelStats> {
-        let entities: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM entities", [], |row| row.get(0))
-            .context("failed to count entities")?;
-        let assertions: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM assertions", [], |row| row.get(0))
-            .context("failed to count assertions")?;
-        let active_assertions: i64 = self
+        let (entities, assertions, active, uncertain, retracted, evidences, corrections): (
+            i64, i64, i64, i64, i64, i64, i64,
+        ) = self
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM assertions WHERE status = 'active'",
+                "SELECT \
+                 (SELECT COUNT(*) FROM entities), \
+                 (SELECT COUNT(*) FROM assertions), \
+                 (SELECT COUNT(*) FROM assertions WHERE status = 'active'), \
+                 (SELECT COUNT(*) FROM assertions WHERE status = 'uncertain'), \
+                 (SELECT COUNT(*) FROM assertions WHERE status = 'retracted'), \
+                 (SELECT COUNT(*) FROM evidences), \
+                 (SELECT COUNT(*) FROM assertions WHERE kind = 'correction')",
                 [],
-                |row| row.get(0),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
             )
-            .context("failed to count active assertions")?;
-        let uncertain_assertions: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM assertions WHERE status = 'uncertain'",
-                [],
-                |row| row.get(0),
-            )
-            .context("failed to count uncertain assertions")?;
-        let retracted_assertions: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM assertions WHERE status = 'retracted'",
-                [],
-                |row| row.get(0),
-            )
-            .context("failed to count retracted assertions")?;
-        let evidences: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM evidences", [], |row| row.get(0))
-            .context("failed to count evidences")?;
-        let corrections: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM assertions WHERE kind = 'correction'",
-                [],
-                |row| row.get(0),
-            )
-            .context("failed to count corrections")?;
+            .context("failed to compute stats")?;
 
         Ok(ModelStats {
             entities: entities as u64,
             assertions: assertions as u64,
-            active_assertions: active_assertions as u64,
-            uncertain_assertions: uncertain_assertions as u64,
-            retracted_assertions: retracted_assertions as u64,
+            active_assertions: active as u64,
+            uncertain_assertions: uncertain as u64,
+            retracted_assertions: retracted as u64,
             evidences: evidences as u64,
             corrections: corrections as u64,
         })
@@ -1032,29 +1019,37 @@ impl Store {
         let assertions = self.get_assertions_for_entity(entity_id)?;
         let assertion_ids: Vec<String> = assertions.iter().map(|a| a.id.clone()).collect();
 
+        fn in_clause(ids: &[String]) -> String {
+            (0..ids.len()).map(|_| "?").collect::<Vec<_>>().join(", ")
+        }
+
         self.transaction(|| {
-            // Delete evidence for all assertions
-            for aid in &assertion_ids {
-                self.conn
-                    .execute("DELETE FROM evidences WHERE assertion_id = ?1", params![aid])
-                    .with_context(|| format!("failed to delete evidence for assertion: {aid}"))?;
-            }
+            if !assertion_ids.is_empty() {
+                let placeholders = in_clause(&assertion_ids);
 
-            // Delete assertion relations involving these assertions
-            for aid in &assertion_ids {
-                self.conn
-                    .execute(
-                        "DELETE FROM assertion_relations WHERE from_assertion = ?1 OR to_assertion = ?1",
-                        params![aid],
-                    )
-                    .with_context(|| format!("failed to delete assertion relations for: {aid}"))?;
-            }
+                // Delete evidence for all assertions
+                let sql = format!("DELETE FROM evidences WHERE assertion_id IN ({placeholders})");
+                self.conn.execute(&sql, rusqlite::params_from_iter(assertion_ids.iter()))?;
 
-            // Delete assertions
-            for aid in &assertion_ids {
-                self.conn
-                    .execute("DELETE FROM assertions WHERE id = ?1", params![aid])
-                    .with_context(|| format!("failed to delete assertion: {aid}"))?;
+                // Delete assertion relations involving these assertions
+                let double = format!(
+                    "DELETE FROM assertion_relations WHERE from_assertion IN ({p}) OR to_assertion IN ({p})",
+                    p = placeholders
+                );
+                self.conn.execute(
+                    &double,
+                    rusqlite::params_from_iter(
+                        assertion_ids.iter().chain(assertion_ids.iter()),
+                    ),
+                )?;
+
+                // Delete assertions
+                let sql = format!("DELETE FROM assertions WHERE id IN ({placeholders})");
+                self.conn.execute(&sql, rusqlite::params_from_iter(assertion_ids.iter()))?;
+
+                // Delete changelog entries for assertions
+                let sql = format!("DELETE FROM changelog WHERE target_id IN ({placeholders})");
+                self.conn.execute(&sql, rusqlite::params_from_iter(assertion_ids.iter()))?;
             }
 
             // Delete entity relations
@@ -1065,18 +1060,13 @@ impl Store {
                 )
                 .context("failed to delete entity relations")?;
 
-            // Delete changelog entries referencing this entity or its assertions
+            // Delete changelog entries for the entity itself
             self.conn
                 .execute(
                     "DELETE FROM changelog WHERE target_id = ?1",
                     params![entity_id],
                 )
                 .context("failed to delete changelog entries")?;
-            for aid in &assertion_ids {
-                self.conn
-                    .execute("DELETE FROM changelog WHERE target_id = ?1", params![aid])
-                    .with_context(|| format!("failed to delete changelog for assertion: {aid}"))?;
-            }
 
             // Delete the entity itself
             self.conn
@@ -1085,7 +1075,6 @@ impl Store {
 
             Ok(())
         })?;
-
         Ok(true)
     }
 
@@ -1119,6 +1108,19 @@ fn split_ground(ground: &str) -> (&str, &str) {
         Some((source, detail)) if !source.is_empty() && !detail.is_empty() => (source, detail),
         _ => ("note", ground),
     }
+}
+
+/// Extracts the 5 standard entity columns from a `query_row` callback into a tuple,
+/// then maps through `map_entity_row`. Shared by `get_entity` and `get_entity_by_name`.
+fn entity_from_query_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<(String, String, String, String, String)> {
+    let id: String = row.get(0)?;
+    let qualified_name: String = row.get(1)?;
+    let kind: String = row.get(2)?;
+    let origin: String = row.get(3)?;
+    let created_at: String = row.get(4)?;
+    Ok((id, qualified_name, kind, origin, created_at))
 }
 
 fn map_entity_row(
