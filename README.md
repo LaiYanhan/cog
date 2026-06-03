@@ -80,12 +80,15 @@ cog trace <entity>
 
 # List all entities with assertion counts
 cog index
-
+cog index --kind function       # filter to functions
+cog index --origin scan         # filter to auto-scanned entities
+cog index --prefix auth::       # filter by qualified name prefix
 # Structural consistency checks
-cog verify --scan              # detect stale/unmodeled code
+cog verify --scan                      # detect stale/unmodeled code
+cog verify --scan --scan-path src/     # scan a specific directory
 cog verify
-cog verify --scope <entity>       # scope to a subtree
-cog verify --clean                # also delete isolated entities
+cog verify --scope <entity>            # scope to a subtree
+cog verify --clean                     # also delete isolated entities
 
 # Model statistics
 cog stats
