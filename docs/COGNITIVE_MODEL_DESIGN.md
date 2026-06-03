@@ -1,6 +1,6 @@
 # Coding Agent 认知模型设计报告
 
-> 日期：2026-06-01
+> 日期：2026-06-03
 > 状态：设计阶段
 > 范围：为 LLM Coding Agent 构建外部化认知模型的理论框架与工程方案
 
@@ -119,9 +119,9 @@ Observation: "login 返回 None，但密码是正确的"
 
 此算法基于 Doyle (1979) 的 **Truth Maintenance System (TMS)**，是经过 40+ 年验证的信念维护方法。
 
-#### 唯一
+#### 唯一（单一活跃状态）
 
-模型在任意时刻只有一个活跃状态。所有历史保留在 append-only changelog 中，但当前状态是唯一的。不存在分支或多个候选。
+模型在任意时刻只有一个活跃状态。分支机制允许创建快照用于推理推演，但主模型始终唯一。所有历史保留在 append-only changelog 中。
 
 ---
 
@@ -527,10 +527,147 @@ Agent 发现模型中有:
 
 ---
 
-## 7 开放问题与后续方向
+## 7 认知模型的价值边界与改进方向
 
-### 7.1 当前设计中待验证的假设
+> 本节基于 cog v0.1.0 的实际使用经验，特别是对 cog 自身进行自我建模（self-bootstrapping）的实践反思。
 
+### 7.1 潜空间 vs 原始代码空间
+
+认知模型本质上是将原始代码空间压缩为一个**可推理的潜空间**。这个潜空间由四个层次的表示构成：
+
+| 层次 | 来源 | 信息类型 | 类比 |
+|------|------|----------|------|
+| 结构层 | tree-sitter 扫描 | entity 名称、kind、containment 层级 | 骨架 |
+| 关系层 | import 解析 + manual depend | contains/calls/uses 有向边 | 连接 |
+| 语义层 | LLM assert | contract/intent/invariant/fragility/correction | 理解 |
+| 时序层 | changelog | 操作审计轨迹 | 历史 |
+
+### 7.2 cog 的不可替代价值：三层分析
+
+一个自然的问题是：随着基础模型能力增强，直接读代码就能完成所有分析，cog 的价值何在？静态分析工具也能提取结构信息和质量指标，cog 和它们的区别在哪？
+
+答案在于三个基础模型和静态分析工具都做不到的特性：
+
+#### 层次一：推理持久化（不是事实存储，是推理链存储）
+
+数据库存的是事实："merge_branch 存在于 branch_cmd.rs，54 行，调用 apply_item"。
+
+cog 存的是推理链：
+```
+merge_branch:
+  intent: "分支合并是原型改进的主要载体"
+  fragility → correction: "从 Err(_) => skipped 改为传播错误"
+  depends_on: apply_item 的行为契约
+  设计决策: 为什么选择 propagate 而不是 log + skip
+```
+
+推理链携带因果结构。一个 agent 读到这条断言，不需要重新理解"为什么这个改过"——断言本身就是推理过程的结构化快照。
+
+基础模型在每个 session 从零开始构建理解。cog 让推理**跨 session 复合**，且保持确定性（同一条断言永远表达同一个判断）。
+
+#### 层次二：TMS 级联是真正的不可替代特性
+
+当知识被推翻时（retract），系统沿 `depends_on` 边 BFS，自动识别所有受影响的推理：
+
+```
+retract("批量删除使用 IN (?,?) 语法")
+  → cascade: "DELETE 操作不会留下孤立证据" → Uncertain
+  → cascade: 所有依赖 delete_entity 批量语义的断言 → GroundWeakened 或 Uncertain
+```
+
+没有任何静态分析工具做这件事。也没有任何基础模型能在 session 之间做到这件事——因为它没有跨 session 的状态。TMS 级联在大规模代码库中是不可人工追踪的，它将"知识变动的影响评估"从非确定性的推理问题变成了确定性的图算法。
+
+#### 层次三：潜空间将规划变成图搜索
+
+没有 cog 时，"如果我要改 Store，会影响什么？"是一个需要逐文件阅读的推理问题。
+
+有了 cog 后，这个问题变成 `cog impact model::store::Store`——一个 O(V+E) 的 BFS 遍历，与代码库大小线性相关，与 agent 的注意力窗口无关。
+
+即使基础模型有无限的上下文窗口，图搜索仍然是确定性的、完整的、可重复的——而"读完所有代码后在脑中追踪影响"永远是非确定性的。
+
+### 7.3 什么不是 cog 的价值
+
+明确排除在外的东西：
+
+- **不是更好的静态分析器**。行数统计、圈复杂度、代码相似度——这些是 SonarQube、CodeClimate 的领地。即使基础模型够强，直接读代码也能完成这些分析。
+- **不是代码索引服务**。ctags、LSP、grep 已经做得足够好。cog 的 entity 列表是推理的锚点，不是代码浏览的替代品。
+- **不是文档生成器**。cog 的断言是给 agent 的推理输入，不是给人读的 API 文档。
+
+### 7.4 当前潜空间的缺陷
+
+基于实际使用经验，当前潜空间存在三个关键缺陷：
+
+**缺陷 1：实体元数据过于稀疏。** tree-sitter 扫描只提取名称和 kind。`Store::stats` 和 `Store::get_entity` 在潜空间中的信息密度相同——一个名字、一个 kind。但前者是 55 行重构到 30 行的方法，后者是 15 行的简单查询。缺少实现复杂度的信号，agent 无法回答"哪些方法最需要审查"。
+
+**缺陷 2：关系边过于粗糙。** 只有 contains/calls/uses 三种。但代码中真正的耦合来源更丰富：`apply_item` 的分支数取决于 `DiffItem` 的变体数（结构耦合）；`diff_summary` 的输出行数取决于 `DiffSummary` 的字段数（数据耦合）。这些比 calls/uses 更细粒度的耦合是代码质量问题的真正来源。
+
+**缺陷 3：查询返回的是数据，不是推理。** `cog query X` 返回 X 的断言和关系列表。但 agent 真正想问的问题是"改 X 安全吗？"或"X 有什么历史教训？"。这些综合查询需要 agent 手动组合多个命令。
+
+### 7.5 改进方向
+
+改进应聚焦于让 cog 成为更好的**推理介质**，而不是更好的分析器。
+
+#### 方向一：丰富依赖关系的语义
+
+当前 `--depends-on` 只表达"断言 A 依赖于断言 B"，且级联策略是一刀切的——依赖被 retract 时自身变为 Uncertain。但实际推理中还有更多关系类型：
+
+| 关系 | 含义 | 级联行为 |
+|------|------|----------|
+| `depends_on` | A 的成立依赖于 B | B retract → A Uncertain（当前行为） |
+| `refines` | A 是对 B 的细化 | B retract → A GroundWeakened（不一定失效） |
+| `contradicts` | A 与 B 矛盾 | A assert → B Uncertain |
+| `supersedes` | A 替代了 B | B retract 对 A 无影响 |
+
+这使得推理链的表达力从"全有或全无"进化为更精确的因果语义。
+
+#### 方向二：将分支进化为推理沙箱
+
+当前分支是数据的快照。但其真正价值应该是**推理的快照**——在潜空间中做推演而非在代码空间中试错：
+
+```
+cog branch create --name hypothesis-A
+cog branch switch hypothesis-A
+# 在分支中构建假设性知识模型
+cog assert X --kind intent --claim "假设方案 A" --grounds "plan:hypothesis"
+cog impact X  → 看这个假设会波及哪些实体和断言
+cog verify    → 检查假设是否与现有知识矛盾
+cog branch switch _main
+cog branch diff hypothesis-A  → 对比两个知识模型的差异
+cog branch merge hypothesis-A --apply-all  或  cog branch drop hypothesis-A
+```
+
+这比"创建一个数据库副本"的价值高得多——它是在潜空间中做推演，利用 `impact` 和 `verify` 在实施前评估方案的风险。
+
+#### 方向三：从"查实体"进化到"问问题"
+
+当前 query 返回一个实体的断言和关系。但 agent 真正需要的推理原语是：
+
+| 原语 | 当前实现 | 需要的组合 |
+|------|----------|-----------|
+|"改 X 安全吗？"| 手动组合 impact + query | `cog plan <entity>` → 综合 impact 范围 + fragility 密度 + 下游断言状态 |
+|"X 有什么历史教训？" | 手动遍历 correction assertions | `cog history <entity>` → correction 链 + changelog 过滤 |
+|"X 和 Y 有关联吗？" | 无 | `cog path <entity-X> <entity-Y>` → 图搜索最短路径 |
+|"最近什么变了？" | 无 | `cog diff --since <date>` → 时间范围内的变更摘要 |
+
+这些高层原语让 cog 从"知识库"进化为"推理引擎"。
+
+#### 方向四（轻度增强）：实体元数据丰富化
+
+在 tree-sitter 扫描时提取少量基础度量，不追求全面分析，仅补充最基础的规划信号：
+
+| 信号 | 来源 | 规划价值 |
+|------|------|----------|
+| 行数（line_count） | tree-sitter 节点范围 | 复杂度代理，帮助 agent 优先审查大方法 |
+| fan-in | 入边计数 | 改动影响面代理 |
+| fan-out | 出边计数 | 依赖复杂度代理 |
+| pub/private | 可见性修饰符 | 区分 API 表面 vs 内部实现 |
+
+这些信号只需在扫描时额外提取，不需要引入重量级分析。目标是让 agent 在纯潜空间中就能做出"优先审查哪个方法"的判断，而不是在完全缺失质量信号的情况下被迫回到代码空间。
+
+---
+
+## 8 开放问题与后续方向
+### 8.1 当前设计中待验证的假设
 | 假设 | 风险 | 验证方式 |
 |------|------|---------|
 | LLM 能可靠地提取 Assertion | LLM 可能生成模糊或错误的断言 | 实际 task 实验，衡量 assertion 准确率 |
@@ -539,7 +676,7 @@ Agent 发现模型中有:
 | 渐进 bootstrap 足够有效 | 早期 task 可能因模型不完整而质量下降 | 对比有/无模型的 task 完成质量 |
 
 ### 7.2 后续方向
-
+### 8.2 后续方向
 - **自动层集成**：从 LSP / rust-analyzer / cargo metadata 自动提取 Entity 和结构关系
 - **Assertion 质量评估**：设计度量标准衡量断言的信息量和准确性
 - **跨项目迁移**：相似项目间的认知模型是否可以迁移
