@@ -257,8 +257,16 @@ pub fn diff_summary(summary: &DiffSummary) -> String {
     row("evidences", summary.evidences_removed, "-");
     row("entity_relations", summary.entity_relations_added, "+");
     row("entity_relations", summary.entity_relations_removed, "-");
-    row("assertion_relations", summary.assertion_relations_added, "+");
-    row("assertion_relations", summary.assertion_relations_removed, "-");
+    row(
+        "assertion_relations",
+        summary.assertion_relations_added,
+        "+",
+    );
+    row(
+        "assertion_relations",
+        summary.assertion_relations_removed,
+        "-",
+    );
     out
 }
 

@@ -894,8 +894,10 @@ impl Store {
             .conn
             .prepare(&sql)
             .context("failed to prepare get_assertions_for_entities statement")?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            entity_ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = entity_ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
         let mut rows = stmt
             .query(params.as_slice())
             .context("failed to query assertions by entity ids")?;
@@ -952,7 +954,6 @@ impl Store {
         Ok(())
     }
 
-
     pub fn count_relations_for_entity(&self, entity_id: &str) -> Result<u64> {
         let count: i64 = self
             .conn
@@ -967,7 +968,13 @@ impl Store {
 
     pub fn stats(&self) -> Result<ModelStats> {
         let (entities, assertions, active, uncertain, retracted, evidences, corrections): (
-            i64, i64, i64, i64, i64, i64, i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
         ) = self
             .conn
             .query_row(
