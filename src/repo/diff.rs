@@ -262,6 +262,7 @@ mod tests {
             qualified_name: name.to_string(),
             kind: EntityKind::Function,
             origin: EntityOrigin::Manual,
+            metrics: crate::domain::metrics::EntityMetrics::empty(),
             created_at: Utc::now(),
         }
     }

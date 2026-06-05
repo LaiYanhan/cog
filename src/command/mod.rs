@@ -11,6 +11,8 @@ pub mod retract;
 pub mod stats;
 pub mod trace;
 pub mod verify;
+pub mod experiment_cmd;
+pub mod backup_cmd;
 
 pub struct CommandOutput {
     pub text: String,

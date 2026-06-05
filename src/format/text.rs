@@ -60,6 +60,18 @@ impl TextRenderer {
         let mut out = String::new();
         let _ = writeln!(out, "entity: {} [{}]", entity.qualified_name, entity.kind);
 
+        // Show metrics if any are set
+        let m = &entity.metrics;
+        let has_metrics = m.fan_in.is_some() || m.fan_out.is_some() || m.line_count.is_some();
+        if has_metrics {
+            let mut parts = Vec::new();
+            if let Some(fi) = m.fan_in { parts.push(format!("fan_in={fi}")); }
+            if let Some(fo) = m.fan_out { parts.push(format!("fan_out={fo}")); }
+            if let Some(lc) = m.line_count { parts.push(format!("lines={lc}")); }
+            parts.push(format!("risk={}", m.risk_level()));
+            let _ = writeln!(out, "metrics: {}", parts.join(", "));
+        }
+
         out.push_str("assertions:\n");
         if assertions.is_empty() {
             out.push_str("(none)\n");

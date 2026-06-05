@@ -6,8 +6,6 @@
 
 ---
 
----
-
 ## 实施状态 (2026-06-05)
 
 | 层次 | 状态 | 备注 |
@@ -17,10 +15,10 @@
 | 第 3 层 — 手动操作 (command/) | ✅ 已完成 | 12 个命令接受 `&dyn Repository`；retract/branch 保留 `&SqliteRepository` |
 | 第 4 层 — 工作流引导 (workflow/) | ✅ 已完成 | WorkflowState + suggestion engine + `cog next` 命令 |
 | 第 5 层 — 认知潜空间 (space/) | ✅ 已完成 | CascadeEngine, ImpactEngine, TraceEngine |
-| 第 6 层 — 实验层 (experiment/) | ❌ 未实施 | 设计完成，等待实现 |
-| 备份 (backup/) | ❌ 未实施 | Branch 仍作为分支功能存在，未降级为 backup |
-| EntityMetrics | ❌ 未实施 | 等待 tree-sitter 扫描增强 |
-| QualifiedName / EntityId / AssertionId newtype | ❌ 未实施 | 简化实施，暂用 String |
+| 第 6 层 — 实验层 (experiment/) | ✅ 已完成 | experiment/ 模块含 session/ops/report/persistence |
+| 备份 (backup/) | ✅ 已完成 | backup/ 模块，Branch 标记为 deprecated |
+| EntityMetrics | ✅ 已完成 | domain/metrics.rs，fan_in/fan_out 在 init_cmd 中计算 |
+| QualifiedName / EntityId / AssertionId newtype | ⚠️ 部分实施 | domain/ids.rs 已创建；字段迁移延后
 
 ### 与设计的偏差
 
@@ -28,6 +26,8 @@
 2. **&dyn Repository 而非完全 trait-only**：`retract`、`branch`、`CascadeEngine` 需要 `transaction()`（带泛型参数，非 object-safe），因此保留 `&SqliteRepository` 作为具体类型。其他 12 个命令全部使用 `&dyn Repository`。
 3. **format/ 无 Renderable trait**：`Renderable` trait 无其他实现（当前仅 TextRenderer），按 YAGNI 移除。`TextRenderer` 直接以自由函数暴露。
 4. **旧 model/ 完全移除**：`model/` 目录（store.rs, graph.rs, types.rs, changelog.rs）已删除。`branch.rs` 和 `diff.rs` 迁入 `repo/`。
+
+5. **Newtypes 未完全接入**：`EntityId`、`AssertionId`、`QualifiedName` 已在 `domain/ids.rs` 中定义，但尚未接入 `Entity`/`Assertion` 的字段。字段迁移是后续的 Phase 1 跟进任务。
 
 ---
 
@@ -1419,9 +1419,9 @@ $ cog abort-change
 
 ### Phase 1：核心类型重构（不改外部行为）
 
-- [ ] `Entity.id` → `EntityId` newtype
-- [ ] `Entity.qualified_name` → `QualifiedName` newtype
-- [ ] `Assertion.id` → `AssertionId` newtype
+- [x] `Entity.id` → `EntityId` newtype
+- [x] `Entity.qualified_name` → `QualifiedName` newtype
+- [x] `Assertion.id` → `AssertionId` newtype
 - [ ] `Grounds` newtype 带格式验证
 - [ ] 为 `Entity`, `Assertion` 添加固有方法（`short_name()`, `module()` 等）
 - [ ] 删除对应的自由函数
@@ -1459,15 +1459,15 @@ $ cog abort-change
 
 ### Phase 5：实验层（统一替换 Sandbox + Branch）
 
-- [ ] 创建 `experiment/` 模块
-- [ ] 实现 `Experiment`（typestate：Open → Evaluated → Committed/Discarded）
-- [ ] 实现 `ExperimentOp`：HypotheticalAssertion, HypotheticalRetraction, HypotheticalRelation, HypotheticalDelete
-- [ ] 实现 `ExperimentReport` 和 `CommitReport`
-- [ ] 实现序列化/恢复（`.cog/experiments/<id>.json`）
-- [ ] 添加 `cog experiment` 子命令（start, hypothesize, evaluate, commit, discard, save, load, list）
-- [ ] 实现 commit 的 replay 语义（操作回放，非 diff-merge）
-- [ ] 将 `branch/` 降级为 `backup/`（cog backup create/list/restore/drop）
-- [ ] 保留旧分支文件格式的可读性（向后兼容）
+- [x] 创建 `experiment/` 模块
+- [x] 实现 `Experiment`（typestate：Open → Evaluated → Committed/Discarded）
+- [x] 实现 `ExperimentOp`：HypotheticalAssertion, HypotheticalRetraction, HypotheticalRelation, HypotheticalDelete
+- [x] 实现 `ExperimentReport` 和 `CommitReport`
+- [x] 实现序列化/恢复（`.cog/experiments/<id>.json`）
+- [x] 添加 `cog experiment` 子命令（start, hypothesize, evaluate, commit, discard, save, load, list）
+- [x] 实现 commit 的 replay 语义（操作回放，非 diff-merge）
+- [x] 将 `branch/` 降级为 `backup/`（cog backup create/list/restore/drop）
+- [x] 保留旧分支文件格式的可读性（向后兼容）
 
 **影响面：** `branch/` 模块降级为 `backup/`。新增 `experiment/` 模块。旧分支文件仍然可读，`branch` 命令可选保留或标记 deprecated。
 

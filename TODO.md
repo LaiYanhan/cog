@@ -22,15 +22,25 @@ Implemented: `WorkflowState` state machine (`workflow/state.rs`, persisted to `.
 - [ ] 实现 `cog path <entity-a> <entity-b>`：双向 BFS 搜索两个实体间的最短路径
 - [ ] 实现 `cog changes [--since <date>]`：时间范围内的断言变更摘要（新增、撤销、纠正）
 
-## 实体元数据丰富化（轻度增强）
+## 实体元数据丰富化 ✅
 
-- [ ] tree-sitter 扫描时提取 `line_count`（节点范围差）存入 entities 表
-- [ ] tree-sitter 扫描时提取 `visibility`（pub/private/crate）存入 entities 表
-- [ ] 扫描后计算 `fan_in`（入边计数）和 `fan_out`（出边计数）存入 entities 表
-- [ ] `cog query` 输出展示这些度量
-- [ ] `cog index` 支持按 line_count / fan_in / fan_out 排序
-- [ ] schema migration：entities 表增加 line_count、visibility、fan_in、fan_out 列
+Implemented: `EntityMetrics` struct (`domain/metrics.rs`) with `line_count`, `fan_in`/`fan_out` (BFS-computed), `visibility`, and `RiskLevel` heuristic. Metrics are populated during tree-sitter scanning and stored in the entities table. `cog query` and `cog index` display and sort by these metrics.
 
+### 已完成项
+- [x] tree-sitter 扫描时提取 `line_count`（节点范围差）存入 entities 表
+- [x] tree-sitter 扫描时提取 `visibility`（pub/private/crate）存入 entities 表
+- [x] 扫描后计算 `fan_in`（入边计数）和 `fan_out`（出边计数）存入 entities 表
+- [x] `cog query` 输出展示这些度量
+- [x] `cog index` 支持按 line_count / fan_in / fan_out 排序
+- [x] schema migration：entities 表增加 line_count、visibility、fan_in、fan_out 列
+
+## 实验层 (Experiment Layer) ✅
+
+Implemented: full hypothesis-testing sandbox (`src/experiment/`) that operates on an in-memory snapshot without modifying the real model. BFS subgraph loading from a focus entity (configurable `max_nodes`), hypothetical assertion ops, cascade simulation and contradiction detection via `evaluate`, plus commit/discard lifecycle. Persisted to `.cog/experiments/<id>.json`.
+
+Commands: `cog experiment start|hypothesize|evaluate|report|commit|discard|list|save|load`.
+
+Integrated into the workflow suggestion engine: `StartExperiment` and `StartExperimentDuringChange` action kinds suggest experiments at appropriate phases.
 ## 数据模型注意事项
 
 - 所有 schema 变更必须是增量的（只加列/表，不删不改）

@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 use crate::command::{self, CommandOutput};
 use crate::domain::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind, ExportFormat};
+use crate::backup::BackupManager;
 use crate::repo::BranchManager;
 use crate::repo::SqliteRepository;
 use crate::workflow::{WorkflowState, suggest_actions};
@@ -117,10 +118,20 @@ pub enum Commands {
         /// Entity qualified name to delete (cascades to assertions, evidence, relations)
         entity: String,
     },
-    /// Manage model branches for speculative changes
+    /// [DEPRECATED: use 'cog experiment' or 'cog backup' instead] Manage model branches
     Branch {
         #[command(subcommand)]
         action: BranchAction,
+    },
+    /// Run hypothesis experiments without modifying the real model
+    Experiment {
+        #[command(subcommand)]
+        action: ExperimentAction,
+    },
+    /// Manage model backups (simplified snapshots without diff/merge)
+    Backup {
+        #[command(subcommand)]
+        action: BackupAction,
     },
     /// Scan a codebase and populate the model with structural entities
     Init {
@@ -192,6 +203,92 @@ pub enum BranchAction {
     /// Delete a branch
     Drop {
         /// Branch name
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ExperimentAction {
+    /// Start a new experiment focused on an entity
+    Start {
+        /// Entity to focus the experiment on
+        entity: String,
+        /// Description of the experiment
+        #[arg(long)]
+        description: Option<String>,
+        /// Maximum nodes to load into the experiment subgraph
+        #[arg(long, default_value = "500")]
+        max_nodes: usize,
+    },
+    /// Add a hypothetical assertion to the experiment
+    Hypothesize {
+        /// Experiment ID (short or full)
+        id: String,
+        /// Entity to assert about
+        #[arg(long)]
+        entity: String,
+        /// Kind of assertion
+        #[arg(long)]
+        kind: AssertionKind,
+        /// The claim
+        #[arg(long)]
+        claim: String,
+        /// Grounds for the claim
+        #[arg(long)]
+        grounds: String,
+    },
+    /// Evaluate the experiment — simulate cascade and detect contradictions
+    Evaluate {
+        /// Experiment ID
+        id: String,
+    },
+    /// Show the experiment report
+    Report {
+        /// Experiment ID
+        id: String,
+    },
+    /// Commit the experiment to the real model
+    Commit {
+        /// Experiment ID
+        id: String,
+    },
+    /// Discard the experiment without changes
+    Discard {
+        /// Experiment ID
+        id: String,
+    },
+    /// List all saved experiments
+    List,
+    /// Save the current experiment state to disk
+    Save {
+        /// Experiment ID
+        id: String,
+    },
+    /// Load a saved experiment from disk
+    Load {
+        /// Experiment ID
+        id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BackupAction {
+    /// Create a full backup of the current model
+    Create {
+        /// Backup name
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// List all backups
+    List,
+    /// Restore from a backup (overwrites current model)
+    Restore {
+        /// Backup name to restore
+        name: String,
+    },
+    /// Delete a backup
+    Drop {
+        /// Backup name to delete
         name: String,
     },
 }
@@ -304,6 +401,56 @@ impl Cli {
             Commands::Branch { action } => {
                 let mgr = BranchManager::new(&self.db_path());
                 command::branch_cmd::execute(store, &mgr, action)
+            }
+            Commands::Experiment { action } => {
+                use ExperimentAction::*;
+                match action {
+                    Start { entity, description, max_nodes } => {
+                        command::experiment_cmd::start(store, entity, description.clone(), *max_nodes, &cog_dir)
+                    }
+                    Hypothesize { id, entity, kind, claim, grounds } => {
+                        command::experiment_cmd::hypothesize(id, entity, *kind, claim, grounds, &cog_dir)
+                    }
+                    Evaluate { id } => {
+                        command::experiment_cmd::evaluate(id, &cog_dir)
+                    }
+                    Report { id } => {
+                        command::experiment_cmd::report(id, &cog_dir)
+                    }
+                    Commit { id } => {
+                        command::experiment_cmd::commit(store, id, &cog_dir)
+                    }
+                    Discard { id } => {
+                        command::experiment_cmd::discard(id, &cog_dir)
+                    }
+                    List => {
+                        command::experiment_cmd::list(&cog_dir)
+                    }
+                    Save { id } => {
+                        command::experiment_cmd::save(id, &cog_dir)
+                    }
+                    Load { id } => {
+                        command::experiment_cmd::load(id, &cog_dir)
+                    }
+                }
+            }
+            Commands::Backup { action } => {
+                let mgr = BackupManager::new(&self.db_path());
+                use BackupAction::*;
+                match action {
+                    Create { name } => {
+                        command::backup_cmd::create(&mgr, name.clone())
+                    }
+                    List => {
+                        command::backup_cmd::list(&mgr)
+                    }
+                    Restore { name } => {
+                        command::backup_cmd::restore(&mgr, name)
+                    }
+                    Drop { name } => {
+                        command::backup_cmd::drop(&mgr, name)
+                    }
+                }
             }
             Commands::Init {
                 path,

@@ -77,6 +77,10 @@ pub trait Repository {
     ) -> Result<()>;
     fn list_changelog_entries(&self) -> Result<Vec<ChangelogEntry>>;
 
+    // ── Metrics ────────────────────────────────────────────────────────────
+
+    fn update_entity_metrics(&self, id: &str, metrics: &crate::domain::metrics::EntityMetrics) -> Result<()>;
+
     // ── Utility ─────────────────────────────────────────────────────────────
 
     fn count_relations_for_entity(&self, entity_id: &str) -> Result<u64>;

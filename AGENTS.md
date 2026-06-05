@@ -70,6 +70,8 @@ cargo run -- init .             # scan current dir
 cargo run -- assert my::fn --kind contract --claim "does X" --grounds "code:my::fn"
 cargo run -- query my::fn
 cargo run -- next                # workflow suggestion
+cargo run -- experiment start <entity> -- start a hypothesis experiment
+cargo run -- backup create --name <name> -- create a full model backup
 
 # Direct binary (after build)
 ./target/release/cog init .
@@ -165,6 +167,9 @@ Every command module exports exactly one public `execute()` function. Most accep
 | `src/command/init_cmd.rs` | Tree-sitter scanning orchestration |
 | `src/repo/branch.rs` | BranchManager — snapshot management |
 | `src/repo/diff.rs` | ModelDiff — snapshot comparison |
+| `src/domain/metrics.rs` | EntityMetrics — fan_in, fan_out, line_count, visibility |
+| `src/experiment/session.rs` | Experiment session with BFS subgraph loading |
+| `src/backup/manager.rs` | BackupManager wrapper around DB copy |
 
 ## Runtime/Tooling Preferences
 

@@ -109,6 +109,8 @@ pub struct Entity {
     pub qualified_name: String,
     pub kind: EntityKind,
     pub origin: EntityOrigin,
+    #[serde(default)]
+    pub metrics: crate::domain::metrics::EntityMetrics,
     pub created_at: DateTime<Utc>,
 }
 
@@ -116,24 +118,24 @@ pub struct Entity {
 impl Entity {
     pub fn from_scan(name: &str, kind: EntityKind) -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: uuid::Uuid::new_v4().to_string(),
             qualified_name: name.to_string(),
             kind,
             origin: EntityOrigin::Scan,
+            metrics: crate::domain::metrics::EntityMetrics::empty(),
             created_at: Utc::now(),
         }
     }
-
     pub fn from_manual(name: &str, kind: EntityKind) -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: uuid::Uuid::new_v4().to_string(),
             qualified_name: name.to_string(),
             kind,
             origin: EntityOrigin::Manual,
+            metrics: crate::domain::metrics::EntityMetrics::empty(),
             created_at: Utc::now(),
         }
     }
-
     pub fn short_name(&self) -> &str {
         self.qualified_name
             .rsplit("::")

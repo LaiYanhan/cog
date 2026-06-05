@@ -241,6 +241,38 @@ pub fn execute(
         }
     }
 
+    // ── Compute fan_in/fan_out metrics ───────────────────────────────
+    {
+        let all_entities = repo.list_entities()?;
+        let relations = repo.list_entity_relations()?;
+
+        // Build adjacency: entity_id → (incoming_count, outgoing_count)
+        let mut fan_counts: HashMap<&str, (u32, u32)> = HashMap::new();
+        for entity in &all_entities {
+            fan_counts.entry(&entity.id).or_insert((0, 0));
+        }
+        for rel in &relations {
+            // from → to: from has fan_out, to has fan_in
+            if let Some(from) = fan_counts.get_mut(rel.from_entity.as_str()) {
+                from.1 += 1;
+            }
+            if let Some(to) = fan_counts.get_mut(rel.to_entity.as_str()) {
+                to.0 += 1;
+            }
+        }
+
+        for entity in &all_entities {
+            if let Some(&(fan_in, fan_out)) = fan_counts.get(entity.id.as_str()) {
+                if fan_in > 0 || fan_out > 0 {
+                    let mut metrics = entity.metrics.clone();
+                    metrics.fan_in = Some(fan_in);
+                    metrics.fan_out = Some(fan_out);
+                    let _ = repo.update_entity_metrics(&entity.id, &metrics);
+                }
+            }
+        }
+    }
+
     // Total entities = dirs + files + definitions
     let total_entities = dir_entities.len() + file_entities.len() + def_count;
     let lang_summary = format_language_summary(&result.files_by_language);

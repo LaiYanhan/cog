@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS entities (
     qualified_name TEXT UNIQUE NOT NULL,
     kind TEXT NOT NULL,
     origin TEXT NOT NULL DEFAULT 'manual',
+    metrics_json TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -111,6 +112,19 @@ impl SqliteRepository {
             .context("failed to migrate entities table: add origin column")?;
         }
 
+        // Migration: add metrics_json column for EntityMetrics
+        let has_metrics: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('entities') WHERE name = 'metrics_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !has_metrics {
+            conn.execute_batch("ALTER TABLE entities ADD COLUMN metrics_json TEXT")
+                .context("failed to migrate entities table: add metrics_json column")?;
+        }
+
         Ok(Self { conn })
     }
 
@@ -148,6 +162,17 @@ impl SqliteRepository {
         }
     }
 
+    pub fn update_entity_metrics(&self, id: &str, metrics: &crate::domain::metrics::EntityMetrics) -> Result<()> {
+        let json = serde_json::to_string(metrics)?;
+        self.conn
+            .execute(
+                "UPDATE entities SET metrics_json = ?1 WHERE id = ?2",
+                params![json, id],
+            )
+            .context("failed to update entity metrics")?;
+        Ok(())
+    }
+
     pub fn vacuum_into(&self, target_path: &Path) -> Result<()> {
         let path_str = target_path.to_string_lossy();
         self.conn
@@ -171,17 +196,19 @@ impl SqliteRepository {
             qualified_name: qualified_name.to_string(),
             kind,
             origin,
+            metrics: crate::domain::metrics::EntityMetrics::empty(),
             created_at: Utc::now(),
         };
 
         self.conn
             .execute(
-                "INSERT INTO entities (id, qualified_name, kind, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO entities (id, qualified_name, kind, origin, metrics_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     entity.id,
                     entity.qualified_name,
                     entity.kind.to_string(),
                     entity.origin.to_string(),
+                    serde_json::to_string(&entity.metrics).unwrap_or_default(),
                     to_ts(entity.created_at)
                 ],
             )
@@ -198,12 +225,13 @@ impl SqliteRepository {
         }
         self.conn
             .execute(
-                "INSERT INTO entities (id, qualified_name, kind, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO entities (id, qualified_name, kind, origin, metrics_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     entity.id,
                     entity.qualified_name,
                     entity.kind.to_string(),
                     entity.origin.to_string(),
+                    serde_json::to_string(&entity.metrics).unwrap_or_default(),
                     to_ts(entity.created_at)
                 ],
             )
@@ -241,26 +269,26 @@ impl SqliteRepository {
     pub fn get_entity(&self, id: &str) -> Result<Option<Entity>> {
         self.conn
             .query_row(
-                "SELECT id, qualified_name, kind, origin, created_at FROM entities WHERE id = ?1",
+                "SELECT id, qualified_name, kind, origin, metrics_json, created_at FROM entities WHERE id = ?1",
                 params![id],
                 entity_from_query_row,
             )
             .optional()
             .context("failed to fetch entity by id")?
-            .map(|(id, name, kind, origin, ts)| map_entity_row(id, name, kind, origin, ts))
+            .map(|(id, name, kind, origin, metrics_json, ts)| map_entity_row(id, name, kind, origin, metrics_json, ts))
             .transpose()
     }
 
     pub fn get_entity_by_name(&self, name: &str) -> Result<Option<Entity>> {
         self.conn
             .query_row(
-                "SELECT id, qualified_name, kind, origin, created_at FROM entities WHERE qualified_name = ?1",
+                "SELECT id, qualified_name, kind, origin, metrics_json, created_at FROM entities WHERE qualified_name = ?1",
                 params![name],
                 entity_from_query_row,
             )
             .optional()
             .context("failed to fetch entity by name")?
-            .map(|(id, name, kind, origin, ts)| map_entity_row(id, name, kind, origin, ts))
+            .map(|(id, name, kind, origin, metrics_json, ts)| map_entity_row(id, name, kind, origin, metrics_json, ts))
             .transpose()
     }
 
@@ -268,7 +296,7 @@ impl SqliteRepository {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, qualified_name, kind, origin, created_at FROM entities ORDER BY qualified_name",
+                "SELECT id, qualified_name, kind, origin, metrics_json, created_at FROM entities ORDER BY qualified_name",
             )
             .context("failed to prepare list_entities statement")?;
 
@@ -281,6 +309,7 @@ impl SqliteRepository {
                 row.get(2)?,
                 row.get(3)?,
                 row.get(4)?,
+                row.get(5)?,
             )?);
         }
 
@@ -295,7 +324,7 @@ impl SqliteRepository {
         prefix: Option<&str>,
     ) -> Result<Vec<(Entity, usize)>> {
         let mut sql = String::from(
-            "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at, \
+            "SELECT e.id, e.qualified_name, e.kind, e.origin, e.metrics_json, e.created_at, \
              COUNT(a.id) AS assertion_count \
              FROM entities e \
              LEFT JOIN assertions a ON a.entity_id = e.id AND a.status = 'active'",
@@ -338,8 +367,9 @@ impl SqliteRepository {
                 row.get(2)?,
                 row.get(3)?,
                 row.get(4)?,
+                row.get(5)?,
             )?;
-            let count: usize = row.get::<_, i64>(5)? as usize;
+            let count: usize = row.get::<_, i64>(6)? as usize;
             result.push((entity, count));
         }
         Ok(result)
@@ -771,7 +801,7 @@ impl SqliteRepository {
         let mut out_stmt = self
             .conn
             .prepare(
-                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at, r.kind
+                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.metrics_json, e.created_at, r.kind
                  FROM entity_relations r
                  JOIN entities e ON e.id = r.to_entity
                  WHERE r.from_entity = ?1",
@@ -784,7 +814,7 @@ impl SqliteRepository {
             .next()
             .context("failed to iterate outgoing entities")?
         {
-            let relation_kind: String = row.get(5)?;
+            let relation_kind: String = row.get(6)?;
             related.push(RelatedEntity {
                 entity: map_entity_row(
                     row.get(0)?,
@@ -792,6 +822,7 @@ impl SqliteRepository {
                     row.get(2)?,
                     row.get(3)?,
                     row.get(4)?,
+                    row.get(5)?,
                 )?,
                 kind: EntityRelationKind::from_str(&relation_kind)
                     .map_err(|_| anyhow!("invalid entity relation kind in db: {relation_kind}"))?,
@@ -802,7 +833,7 @@ impl SqliteRepository {
         let mut in_stmt = self
             .conn
             .prepare(
-                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at, r.kind
+                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.metrics_json, e.created_at, r.kind
                  FROM entity_relations r
                  JOIN entities e ON e.id = r.from_entity
                  WHERE r.to_entity = ?1",
@@ -815,7 +846,7 @@ impl SqliteRepository {
             .next()
             .context("failed to iterate incoming entities")?
         {
-            let relation_kind: String = row.get(5)?;
+            let relation_kind: String = row.get(6)?;
             related.push(RelatedEntity {
                 entity: map_entity_row(
                     row.get(0)?,
@@ -823,6 +854,7 @@ impl SqliteRepository {
                     row.get(2)?,
                     row.get(3)?,
                     row.get(4)?,
+                    row.get(5)?,
                 )?,
                 kind: EntityRelationKind::from_str(&relation_kind)
                     .map_err(|_| anyhow!("invalid entity relation kind in db: {relation_kind}"))?,
@@ -839,7 +871,7 @@ impl SqliteRepository {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.created_at
+                "SELECT e.id, e.qualified_name, e.kind, e.origin, e.metrics_json, e.created_at
                  FROM entity_relations r
                  JOIN entities e ON e.id = CASE
                      WHEN r.kind = 'contains' THEN r.to_entity
@@ -864,6 +896,7 @@ impl SqliteRepository {
                 row.get(2)?,
                 row.get(3)?,
                 row.get(4)?,
+                row.get(5)?,
             )?);
         }
         Ok(entities)
@@ -1144,17 +1177,18 @@ fn split_ground(ground: &str) -> (&str, &str) {
     }
 }
 
-/// Extracts the 5 standard entity columns from a `query_row` callback into a tuple,
+/// Extracts the 6 standard entity columns from a `query_row` callback into a tuple,
 /// then maps through `map_entity_row`. Shared by `get_entity` and `get_entity_by_name`.
 fn entity_from_query_row(
     row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(String, String, String, String, String)> {
+) -> rusqlite::Result<(String, String, String, String, Option<String>, String)> {
     let id: String = row.get(0)?;
     let qualified_name: String = row.get(1)?;
     let kind: String = row.get(2)?;
     let origin: String = row.get(3)?;
-    let created_at: String = row.get(4)?;
-    Ok((id, qualified_name, kind, origin, created_at))
+    let metrics_json: Option<String> = row.get(4)?;
+    let created_at: String = row.get(5)?;
+    Ok((id, qualified_name, kind, origin, metrics_json, created_at))
 }
 
 fn map_entity_row(
@@ -1162,8 +1196,13 @@ fn map_entity_row(
     qualified_name: String,
     kind: String,
     origin: String,
+    metrics_json: Option<String>,
     created_at: String,
 ) -> Result<Entity> {
+    let metrics: crate::domain::metrics::EntityMetrics = metrics_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
     Ok(Entity {
         id,
         qualified_name,
@@ -1171,6 +1210,7 @@ fn map_entity_row(
             .map_err(|_| anyhow!("invalid entity kind in db: {kind}"))?,
         origin: EntityOrigin::from_str(&origin)
             .map_err(|_| anyhow!("invalid entity origin in db: {origin}"))?,
+        metrics,
         created_at: parse_ts(&created_at)?,
     })
 }
@@ -1436,5 +1476,9 @@ impl Repository for SqliteRepository {
 
     fn vacuum_into(&self, target_path: &Path) -> Result<()> {
         self.vacuum_into(target_path)
+    }
+
+    fn update_entity_metrics(&self, id: &str, metrics: &crate::domain::metrics::EntityMetrics) -> Result<()> {
+        self.update_entity_metrics(id, metrics)
     }
 }
