@@ -9,51 +9,51 @@ A Rust binary-only crate, edition 2024. No async, no ORM, no build script. Singl
 ## Architecture & Data Flow
 
 ```
-main.rs → cli::Cli::parse() → command::<module>::execute(&Store) → format::* → CommandOutput
+main.rs → cli::Cli::parse() → command::<module>::execute(&dyn Repository) → format::* → CommandOutput
                                       ↕
-                                 model::Store
+                              repo::SqliteRepository
                            (rusqlite, SQLite, WAL)
+                            impl repo::Repository
                                       ↕
                             analysis::Scanner
                     (tree-sitter, 6 languages)
 ```
 
-### Two-Layer Architecture
+### Six-Layer Architecture
 
-1. **Automatic layer** — `analysis/` module uses tree-sitter parsers to extract entity definitions (functions, classes, types, imports) from source code. Creates `Entity` records + `contains`/`uses` relations grounded `auto:scan`. No LLM involved.
-
-2. **Understanding layer** — LLMs (or humans) record semantic assertions about entities via `cog assert`. Assertions carry a kind, claim text, and a `grounds:` source label. Dependencies between assertions form a TMS (Truth Maintenance System) graph: retracting one assertion cascades `uncertain` status to its dependents.
+Cog is organized into six layers, bottom-up: **code space** (the source code being modeled), **persistence** (`Repository` trait, `SqliteRepository` impl), **analysis+modeling** (tree-sitter scanning + domain types), **cognitive latent space** (graph algorithms: cascade, impact, trace), **workflow guide** (state machine + suggestion engine), and **experiment** (hypothesis evaluation). See `docs/RUST_ARCHITECTURE_REDESIGN.md` §2 for the full layered diagram and design rationale.
 
 ### Data Flow (per command)
 
 1. `cli.rs` parses args (Clap derive)
-2. Dispatches to `command/<module>::execute(store, args)` → `Result<CommandOutput>`
-3. Execute reads/mutates the `Store`, produces a `CommandOutput { text, exit_code }`
+2. Dispatches to `command/<module>::execute(repo, args)` where `repo` is `&dyn Repository` (or `&SqliteRepository` for retract/branch)
+3. Execute reads/mutates through the `Repository` trait, produces a `CommandOutput { text, exit_code }`
 4. `main.rs` calls `output.emit()` and exits with `exit_code` if non-zero
 
 ### Key Design Decisions
 
 - **No async** — everything is synchronous. The tree-sitter parsing and SQLite operations are fast enough.
 - **anyhow::Result** everywhere — no custom error types. Preconditions use `bail!()` / `anyhow!()`.
-- **Interior mutability** via `&Store` — the Store wraps a `rusqlite::Connection` internally.
-- **Output formatting** centralized in `format.rs` — commands build data, format functions render it. Plain text only, no rich formatting.
+- **Repository trait** decouples commands from storage — single `SqliteRepository` impl, tests use `open_in_memory()` for real SQL semantics without disk I/O
+- **Output formatting** centralized in `format/` module with `TextRenderer` struct — commands build data, renderer produces plain text
+- **Workflow state machine** guides agent via `cog next` — serialized to `.cog/workflow_state.json`; tracks Uninit → Ready → Changing transitions
 - **Short IDs** — UUIDs displayed as first 8 chars; resolved automatically across all commands.
 
 ## Key Directories
 
-| Path | Purpose |
-|------|---------|
-| `src/main.rs` | Entry point — parses CLI, opens Store, dispatches, emits output |
-| `src/cli.rs` | Clap-derived CLI definition (Cli struct, Commands enum, BranchAction enum) |
-| `src/command/` | One file per subcommand, all exporting `execute(store, …) -> Result<CommandOutput>` |
-| `src/model/` | Core data model: `types.rs` (Entity, Assertion, Evidence, relations), `store.rs` (SQLite CRUD), `graph.rs` (cascade retraction, impact, trace), `diff.rs` (ModelDiff), `branch.rs` (BranchManager), `changelog.rs` (Changelog) |
-| `src/analysis/` | Tree-sitter scanning: `extract.rs` (Scanner orchestrator), `languages.rs` (Language enum), per-language extractors (`python.rs`, `rust.rs`, `javascript.rs`, `go.rs`, `c.rs`, `java.rs`) |
-| `src/format.rs` | 14 free formatting functions — every output path goes through here |
-| `tests/` | Single `integration.rs` — black-box CLI tests via subprocess |
+| `src/main.rs` | Entry point — opens SqliteRepository, dispatches CLI |
+| `src/cli.rs` | Clap-derived CLI definition, workflow state management |
+| `src/domain/` | Core types: entity, assertion, evidence, relations, grounds, reports |
+| `src/repo/` | Repository trait + SqliteRepository + BranchManager + ModelDiff |
+| `src/command/` | One file per subcommand: most accept `&dyn Repository`, retract/branch accept `&SqliteRepository` |
+| `src/space/` | Graph algorithms: CascadeEngine, ImpactEngine, TraceEngine |
+| `src/workflow/` | WorkflowState state machine + suggestion engine |
+| `src/format/` | TextRenderer — unified text output for all reports |
+| `src/analysis/` | Tree-sitter scanning (unchanged) |
+| `tests/` | Integration + unit tests (35 total) |
 | `benchmark/` | Harbor Terminus-2 benchmark harness for A/B evaluation |
-| `skills/cog/` | Skill documentation (SKILL.md, WORKFLOWS.md, BEST_PRACTICES.md, BRANCHING.md) — consumed by agent runtime |
-| `docs/` | Design document (`COGNITIVE_MODEL_DESIGN.md`) |
-| `.cog/` | Default SQLite database location (gitignored) |
+| `skills/cog/` | Skill documentation for agent runtime |
+| `docs/` | Design documents |
 
 ## Development Commands
 
@@ -69,6 +69,7 @@ cargo test                      # runs integration tests (3 tests, subprocess-ba
 cargo run -- init .             # scan current dir
 cargo run -- assert my::fn --kind contract --claim "does X" --grounds "code:my::fn"
 cargo run -- query my::fn
+cargo run -- next                # workflow suggestion
 
 # Direct binary (after build)
 ./target/release/cog init .
@@ -82,10 +83,10 @@ cargo run -- query my::fn
 
 ```
 src/command/<name>.rs
-  pub fn execute(store: &Store, <specific_args>) -> Result<CommandOutput>
+  pub fn execute(repo: &dyn Repository, <specific_args>) -> Result<CommandOutput>
 ```
 
-Every command module exports exactly one public `execute()` function. Args vary per command (some take strings, some take enums). The store is always `&Store`.
+Every command module exports exactly one public `execute()` function. Most accept `&dyn Repository`; retract and branch accept `&SqliteRepository`.
 
 ### Error Handling
 
@@ -97,28 +98,26 @@ Every command module exports exactly one public `execute()` function. Args vary 
 
 ### Naming
 
-- **Entities**: `qualified_name` — `::`-separated (e.g. `cog::model::store::Store`).
+- **Entities**: `qualified_name` — `::`-separated (e.g. `cog::repo::sqlite::SqliteRepository`).
 - **`snake_case`** for everything: functions, variables, file names.
 - **`CommandOutput`** struct with `{ text, exit_code }`.
-- **`infer_entity_kind(name)`** heuristic: uppercase start → `Type`, contains `::` → `Function`, else `Module`.
+- **`EntityKind::infer(name)`** heuristic: uppercase start → `Type`, contains `::` → `Function`, else `Module`.
 
 ### Core Patterns
 
-- **`Store`** wraps a single `rusqlite::Connection`. Schema: 6 tables (entities, assertions, evidence, entity_relations, assertion_relations, changelog). UUID primary keys. WAL mode. Foreign keys enabled.
-- **`Changelog::append(store, action, entity_id, detail)`** — mutations append a changelog entry.
-- **Cascade retraction** — `CascadeResult::retract()` BFS through `depends_on` edges, marking dependents `Uncertain` or `GroundWeakened`.
+- **`SqliteRepository`** wraps a `rusqlite::Connection`. Schema: 6 tables (entities, assertions, evidence, entity_relations, assertion_relations, changelog). UUID primary keys. WAL mode. Foreign keys enabled.
+- **`repo.append_changelog(action, target_id, detail)`** — mutations append a changelog entry (Repository trait method).
+- **Cascade retraction** — `CascadeEngine::retract()` BFS through `depends_on` edges, marking dependents `Uncertain` or `GroundWeakened`.
 - **`ModelSnapshot`** — full state capture used for diffing and export. Serialized via serde (JSON/TOML/DOT).
-- **Entity kind inference** (`EntityKind`) — `Module`, `Function`, `Type`. No class/struct distinction.
+- **Entity kind inference** — `EntityKind::infer(name)` classifies entities by qualified name: uppercase → `Type`, contains `::` → `Function`, else `Module`.
 - **Entity origin** (`EntityOrigin`) — `Scan` (auto-extracted by tree-sitter), `Manual` (created via assert/depend).
 - **Assertion status** — `Active`, `Retracted`, `Uncertain`, `GroundWeakened`.
 
 ### Graph Algorithms
 
-| Module | Type | Algorithm |
-|--------|------|-----------|
-| `graph.rs` | `CascadeResult` | BFS — retract one assertion, cascade to all transitive dependents |
-| `graph.rs` | `ImpactResult` | BFS — find all entities downstream of a given entity |
-| `graph.rs` | `TraceResult` | Recursive DFS — build dependency tree leading to an entity (cycle protection via visited set) |
+| `space/cascade.rs` | `CascadeEngine` | BFS — retract one assertion, cascade uncertain to all transitive dependents |
+| `space/impact.rs` | `ImpactEngine` | BFS — find all entities downstream of a given entity |
+| `space/trace.rs` | `TraceEngine` | Recursive DFS — build dependency tree (cycle protection via visited set) |
 
 ### Branching
 
@@ -134,7 +133,8 @@ Every command module exports exactly one public `execute()` function. Args vary 
 - Each test creates a **tempdir** + fresh SQLite DB path, chains multiple CLI invocations via `run_ok()`, and asserts on stdout content.
 - Helper: `cog_bin()` reads `CARGO_BIN_EXE_cog` env var (set by `cargo test`).
 - Pattern: `let output = run_ok(&["init", "."], &db_path)` → assert stdout contains expected text.
-- Three tests: happy path workflow, retraction cascade verification, branch lifecycle.
+- Three integration tests: happy path workflow, retraction cascade verification, branch lifecycle. Plus 32 unit tests.
+- Unit tests in command modules use `SqliteRepository::open()` with tempdir.
 
 ### Scan/Analysis
 
@@ -151,19 +151,20 @@ Every command module exports exactly one public `execute()` function. Args vary 
 
 ## Important Files
 
-| File | Purpose |
-|------|---------|
-| `src/main.rs` | Entry point, store open, dispatch |
-| `src/cli.rs` | All CLI argument definitions (Clap derive) |
-| `src/model/store.rs` | Core — SQLite CRUD, 1243 lines, the largest file |
-| `src/model/graph.rs` | Retraction cascade, impact analysis, dependency tracing |
-| `src/model/types.rs` | All core types and enums |
-| `src/model/diff.rs` | Snapshot comparison for branch merge |
-| `src/model/branch.rs` | Branch create/list/switch/diff/merge/drop |
+| `src/repo/sqlite.rs` | SqliteRepository — SQLite CRUD, 1400 lines, the largest file |
+| `src/repo/trait.rs` | Repository trait — persistence contract |
+| `src/domain/entity.rs` | Entity, EntityKind, EntityOrigin |
+| `src/domain/assertion.rs` | Assertion, AssertionKind, AssertionStatus |
+| `src/space/cascade.rs` | Retraction cascade (CascadeEngine) |
+| `src/space/impact.rs` | Downstream impact analysis (ImpactEngine) |
+| `src/space/trace.rs` | Dependency tracing (TraceEngine) |
+| `src/workflow/state.rs` | WorkflowState machine + transitions |
+| `src/workflow/suggestions.rs` | Suggestion engine for cog next |
+| `src/format/text.rs` | TextRenderer — all output rendering |
 | `src/command/verify.rs` | Structural consistency checks |
 | `src/command/init_cmd.rs` | Tree-sitter scanning orchestration |
-| `src/format.rs` | All output rendering |
-| `.cog/cog.db` | Default database location (gitignored) |
+| `src/repo/branch.rs` | BranchManager — snapshot management |
+| `src/repo/diff.rs` | ModelDiff — snapshot comparison |
 
 ## Runtime/Tooling Preferences
 
@@ -181,7 +182,7 @@ Every command module exports exactly one public `execute()` function. Args vary 
 - **Isolation**: Fresh tempdir + temp DB per test. No shared state.
 - **Coverage**: 3 integration tests exercising: full CRUD workflow, retraction cascade with verification, branch lifecycle.
 - **Running**: `cargo test` (builds binary, runs integration tests).
-- **No unit tests** — all tests are end-to-end through the binary interface.
+- **3 integration tests + 32 unit tests** — integration tests are end-to-end through the binary interface; unit tests exercise individual modules.
 - **Test helpers**: `cog_bin()`, `run(args, db_path)`, `run_ok(args, db_path)`, `parse_assertion_id(output)`.
 - **Error testing**: Commands with `bail!()` failures cause subprocess non-zero exit → caught by `run()` return value.
 
@@ -232,9 +233,9 @@ cargo run -- verify --scan
 
 | Scenario | Assertion Kind | Example |
 |----------|---------------|---------|
-| Understanding a module's API contract | `contract` | `"Store::open creates DB in WAL mode, returns Err on I/O failure"` |
+| Understanding a module's API contract | `contract` | `"SqliteRepository::open creates DB in WAL mode, returns Err on I/O failure"` |
 | Noting a design decision or rationale | `intent` | `"Branch merge skips entity removals to prevent broken cross-references"` |
-| A constraint that must hold | `invariant` | `"Assertion status CascadeResult::retract BFS never revisits already-marked assertions"` |
+| A constraint that must hold | `invariant` | `"CascadeEngine::retract() BFS never revisits already-marked assertions"` |
 | Something fragile or risky | `fragility` | `"Node text extraction assumes tree-sitter node is within source bounds — panics if not"` |
 | A fix applied during this session | `correction` | `"Fixed off-by-one in path_to_qualified — was dropping first segment"` |
 
@@ -284,9 +285,9 @@ This project's self-bootstrapping creates a unique feedback loop: **modeling cog
 | Can't batch-record many assertions at once | Assert `command::assert_cmd` fragility → branch to add bulk-assert or `--file` flag → implement → merge |
 | `verify` misses a specific issue pattern | Assert `command::verify::execute` fragility → branch to add the check → implement → merge |
 | `init` scanned too much noise (e.g. benchmark/) | Assert `analysis::extract::Scanner::scan` fragility → branch to add better skip patterns or `.cogignore` → implement → merge |
-| Branch diff is confusing or incomplete | Assert `model::diff::ModelDiff` fragility → branch to improve diff output → implement → merge |
+| Branch diff is confusing or incomplete | Assert `repo::diff::ModelDiff` fragility → branch to improve diff output → implement → merge |
 | Missing a command or flag that would make your workflow smoother | Assert the relevant module's `intent` with `"would benefit from <feature>"` → branch to design and implement → merge |
-| A graph algorithm is too slow for a real codebase | Assert `model::graph` fragility → branch to optimize → benchmark → merge |
+| A graph algorithm is too slow for a real codebase | Assert `space::cascade` fragility → branch to optimize → benchmark → merge |
 
 ### Rules of the Meta-Loop
 
@@ -311,7 +312,7 @@ cog assert command::index_cmd::execute --kind intent \
   --claim "Should support --json flag for machine-parseable output" \
   --grounds "plan:improvement"
 
-# Step 3: Implement the change in src/command/index_cmd.rs and src/format.rs
+# Step 3: Implement the change in src/command/index_cmd.rs and src/format/text.rs
 # (actual code changes happen here)
 
 # Step 4: Return to main, review, merge
@@ -343,7 +344,7 @@ When a code change breaks compatibility with existing stored data:
    cargo run -- branch create --name pre-migration
    ```
 
-2. **Write a migration** — the `Store` already supports schema migrations (the `origin` column was added via migration). Add a new migration in `store.rs` that:
+2. **Write a migration** — the `SqliteRepository` already supports schema migrations (the `origin` column was added via migration). Add a new migration in `repo/sqlite.rs` that:
    - Checks current schema version (table exists, column exists, or a `pragma user_version` / schema version marker)
    - Alters tables additively (add columns, create new tables) — NEVER `DROP TABLE` or `DROP COLUMN`
    - Transforms existing data in-place or provides backward-compatible defaults for new columns

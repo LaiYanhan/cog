@@ -15,6 +15,9 @@ The binary is `./target/release/cog`.
 # Auto-scan codebase structure (entities + containment)
 cog init .
 
+# Check suggested next actions
+cog next
+
 # Record what you've learned
 cog assert auth::login --kind contract \
     --claim "Returns Ok(token) on valid credentials, Err on invalid" \
@@ -99,9 +102,54 @@ cog export --format toml
 cog export --format dot
 ```
 
-### Branch workflow (speculative modeling)
+### Workflow state machine
 
-Create a sandbox copy of the model for experimentation, then merge only validated knowledge.
+cog tracks workflow state in `.cog/workflow_state.json`. Commands implicitly
+transition state (e.g. `verify` after a change moves to PostChange), and
+`cog next` reads the current state plus model data to suggest the next action.
+
+```sh
+# Show suggested next actions based on current state and model data
+cog next
+
+# Begin tracking a code change (only allowed from Ready state)
+cog start-change "Add retry logic to auth::login"
+cog start-change "Refactor cache layer" --entity cache --entity cache::evict
+
+# After the change, verify consistency
+cog verify --scan
+
+# Complete the change cycle (returns to Ready)
+cog finish-change
+
+# Or abandon the change mid-cycle
+cog abort-change
+```
+
+Workflow commands:
+
+| Command | Description |
+|---|---|
+| `cog next` | Show suggested actions given current workflow state |
+| `cog start-change "<desc>"` | Begin a tracked change cycle |
+| `cog start-change "<desc>" --entity <name>` | Also declare affected entities |
+| `cog finish-change` | Complete the change cycle and return to Ready |
+| `cog abort-change` | Abandon the change cycle and return to Ready |
+
+Typical cycle: `cog next` → `cog start-change "..."` → make code changes →
+`cog verify --scan` → `cog assert` (record what you learned) → `cog finish-change`.
+
+Use the workflow state machine for lightweight hypothesis testing and
+day-to-day change tracking. For deep speculative exploration with full
+model sandboxing, use branches (see below).
+
+
+### Branch workflow (speculative sandbox)
+
+Branches create a full sandbox copy of the model for deep speculative exploration.
+For lightweight hypothesis testing and day-to-day change tracking, prefer the
+workflow state machine (`cog start-change` / `cog verify` / `cog finish-change`)
+above.
 
 ```sh
 # Snapshot current model

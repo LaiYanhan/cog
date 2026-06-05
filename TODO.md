@@ -1,5 +1,13 @@
 # cog TODO
 
+## 接口逻辑简化 ✅
+
+Implemented: `WorkflowState` state machine (`workflow/state.rs`, persisted to `.cog/workflow_state.json`) + `cog next`/`start-change`/`finish-change`/`abort-change` commands + suggestion engine (`workflow/suggestions.rs`).
+
+原来的问题：目前CLI接口逻辑非常复杂，需要LLM充分理解之后才能够发挥相关作用，但这是困难的。因此考虑使用一种状态机的方式，让 CLI 内置 best-practice 从而大幅简化使用难度。
+
+这样就无需 agent 去判断当前究竟应该如何去调用接口，而是直接询问 CLI 就可以得到其下一步可以进行什么操作。
+
 ## 推理介质改进（核心方向）
 
 ### 方向一：将分支进化为推理沙箱
