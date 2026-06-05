@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use crate::analysis::{Language, ScanConfig, Scanner};
 use crate::command::CommandOutput;
-use crate::domain::{EntityKind, EntityOrigin, EntityRelationKind};
+use crate::domain::{EntityKind, EntityOrigin, EntityRelationKind, parent_qname};
 use crate::repo::Repository;
 
 /// Strips common source-directory prefixes from a relative path, then converts
@@ -116,7 +116,7 @@ pub fn execute(
         let entity = repo.upsert_entity(dir_qname, EntityKind::Module, EntityOrigin::Scan)?;
         dir_entities.insert(dir_qname.clone(), entity.id.clone());
 
-        if let Some((parent, _)) = dir_qname.rsplit_once("::")
+        if let Some(parent) = parent_qname(dir_qname)
             && !parent.is_empty()
             && let Some(parent_id) = dir_entities.get(parent)
         {
@@ -168,9 +168,8 @@ pub fn execute(
                 } else {
                     // Short name — the parent is the enclosing scope (module part)
                     // e.g. auth::login::AuthManager::__init__ → parent is auth::login::AuthManager
-                    def.qualified_name
-                        .rsplit_once("::")
-                        .map(|(module, _)| module.to_string())
+                    parent_qname(&def.qualified_name)
+                        .map(|m| m.to_string())
                         .unwrap_or_else(|| p.to_string())
                 }
             })

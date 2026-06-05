@@ -86,9 +86,26 @@ impl FromStr for EntityKind {
     }
 }
 
+// ── Qualified-name helpers ─────────────────────────────────────────────────
+
+/// The last segment of a `::`-separated qualified name, e.g.
+/// `"repo::sqlite::SqliteRepository"` → `"SqliteRepository"`.
+/// Returns the input unchanged if no `::` separator.
+pub fn last_segment(qname: &str) -> &str {
+    qname.rsplit("::").next().unwrap_or(qname)
+}
+
+/// The parent path of a `::`-separated qualified name, e.g.
+/// `"cog::repo::sqlite::SqliteRepository"` → `Some("cog::repo::sqlite")`.
+/// Returns `None` if there is only one segment.
+pub fn parent_qname(qname: &str) -> Option<&str> {
+    qname.rsplit_once("::").map(|(p, _)| p)
+}
+
+
 impl EntityKind {
     pub fn infer(qualified_name: &str) -> Self {
-        let symbol = qualified_name.rsplit("::").next().unwrap_or(qualified_name);
+        let symbol = last_segment(qualified_name);
         if symbol.chars().next().is_some_and(|c| c.is_uppercase()) {
             EntityKind::Type
         } else if qualified_name.contains("::") {
@@ -137,14 +154,11 @@ impl Entity {
         }
     }
     pub fn short_name(&self) -> &str {
-        self.qualified_name
-            .rsplit("::")
-            .next()
-            .unwrap_or(&self.qualified_name)
+        last_segment(&self.qualified_name)
     }
 
     pub fn module(&self) -> Option<&str> {
-        self.qualified_name.rsplit_once("::").map(|(p, _)| p)
+        parent_qname(&self.qualified_name)
     }
 
     pub fn is_public(&self) -> bool {

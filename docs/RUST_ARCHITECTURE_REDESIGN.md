@@ -18,7 +18,7 @@
 | 第 6 层 — 实验层 (experiment/) | ✅ 已完成 | experiment/ 模块含 session/ops/report/persistence |
 | 备份 (backup/) | ✅ 已完成 | backup/ 模块，Branch 标记为 deprecated |
 | EntityMetrics | ✅ 已完成 | domain/metrics.rs，fan_in/fan_out 在 init_cmd 中计算 |
-| QualifiedName / EntityId / AssertionId newtype | ⚠️ 部分实施 | domain/ids.rs 已创建；字段迁移延后
+| QualifiedName / EntityId / AssertionId newtype | ❌ 已移除 | 改用 last_segment()/parent_qname() 自由函数；ID newtype 成本过高，放弃
 
 ### 与设计的偏差
 
@@ -27,7 +27,7 @@
 3. **format/ 无 Renderable trait**：`Renderable` trait 无其他实现（当前仅 TextRenderer），按 YAGNI 移除。`TextRenderer` 直接以自由函数暴露。
 4. **旧 model/ 完全移除**：`model/` 目录（store.rs, graph.rs, types.rs, changelog.rs）已删除。`branch.rs` 和 `diff.rs` 迁入 `repo/`。
 
-5. **Newtypes 未完全接入**：`EntityId`、`AssertionId`、`QualifiedName` 已在 `domain/ids.rs` 中定义，但尚未接入 `Entity`/`Assertion` 的字段。字段迁移是后续的 Phase 1 跟进任务。
+5. **Newtypes 已移除**：`EntityId`/`AssertionId`/`QualifiedName` 的 newtype 方案因 Rust trait-object + coherence 限制，迁移成本（46+ 编译错误，需改 `HashSet`/`HashMap`/Repository trait 全量签名）远超收益。`domain/ids.rs` 已删除，改用 `entity.rs` 中的两个自由函数 `last_segment(&str) -> &str` 和 `parent_qname(&str) -> Option<&str>` 替代 `QualifiedName`。ID 字段保持 `String` 不变。
 
 ---
 
@@ -1419,9 +1419,9 @@ $ cog abort-change
 
 ### Phase 1：核心类型重构（不改外部行为）
 
-- [x] `Entity.id` → `EntityId` newtype
-- [x] `Entity.qualified_name` → `QualifiedName` newtype
-- [x] `Assertion.id` → `AssertionId` newtype
+- [ ] `Entity.id` → `EntityId` newtype — 放弃，String 足够
+- [ ] `Entity.qualified_name` → `QualifiedName` newtype — 放弃，改用 last_segment()/parent_qname() 自由函数
+- [ ] `Assertion.id` → `AssertionId` newtype — 放弃，String 足够
 - [ ] `Grounds` newtype 带格式验证
 - [ ] 为 `Entity`, `Assertion` 添加固有方法（`short_name()`, `module()` 等）
 - [ ] 删除对应的自由函数
