@@ -5,5 +5,4 @@ pub mod session;
 
 pub use ops::ExperimentOp;
 pub use persistence::{list, load, remove, save};
-pub use report::{CommitReport, Contradiction, ExperimentReport};
-pub use session::{Experiment, ExperimentStatus};
+pub use session::Experiment;

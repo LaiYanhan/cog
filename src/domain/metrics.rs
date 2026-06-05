@@ -29,6 +29,8 @@ pub enum Visibility {
 }
 
 impl Visibility {
+    /// Whether this visibility is public. Used by risk assessment and display filtering.
+    #[allow(dead_code)]
     pub fn is_public(self) -> bool {
         matches!(self, Visibility::Public)
     }
@@ -51,6 +53,8 @@ impl EntityMetrics {
     }
 
     /// Create from scan data with line count and visibility.
+    /// Wired when tree-sitter line-count extraction is implemented.
+    #[allow(dead_code)]
     pub fn from_scan(line_count: u32, visibility: Visibility) -> Self {
         Self {
             line_count: Some(line_count),

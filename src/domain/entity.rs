@@ -4,7 +4,6 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // EntityOrigin
@@ -133,26 +132,6 @@ pub struct Entity {
 
 #[allow(dead_code)]
 impl Entity {
-    pub fn from_scan(name: &str, kind: EntityKind) -> Self {
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            qualified_name: name.to_string(),
-            kind,
-            origin: EntityOrigin::Scan,
-            metrics: crate::domain::metrics::EntityMetrics::empty(),
-            created_at: Utc::now(),
-        }
-    }
-    pub fn from_manual(name: &str, kind: EntityKind) -> Self {
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            qualified_name: name.to_string(),
-            kind,
-            origin: EntityOrigin::Manual,
-            metrics: crate::domain::metrics::EntityMetrics::empty(),
-            created_at: Utc::now(),
-        }
-    }
     pub fn short_name(&self) -> &str {
         last_segment(&self.qualified_name)
     }

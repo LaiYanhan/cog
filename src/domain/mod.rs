@@ -15,7 +15,6 @@ pub use assertion::{Assertion, AssertionKind, AssertionStatus};
 pub use changelog::{ChangelogAction, ChangelogEntry};
 pub use entity::{Entity, EntityKind, EntityOrigin, parent_qname};
 pub use evidence::Evidence;
-pub use metrics::{EntityMetrics, RiskLevel, Visibility};
 pub use relations::{
     AssertionRelation, AssertionRelationKind, EntityRelation, EntityRelationKind, RelatedEntity,
     RelationDirection,
