@@ -1,7 +1,7 @@
 use tree_sitter::{Node, TreeCursor};
 
 use super::{Definition, Import, node_text};
-use crate::model::types::EntityKind;
+use crate::domain::EntityKind;
 
 pub fn extract_js<'a>(
     root: &Node<'a>,

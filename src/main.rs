@@ -1,15 +1,17 @@
 mod analysis;
 mod cli;
 mod command;
+mod domain;
 mod format;
-mod model;
-
+mod repo;
+mod space;
+mod workflow;
 use anyhow::Result;
 use clap::Parser;
 
 fn main() -> Result<()> {
     let cli = cli::Cli::parse();
-    let store = model::Store::open(&cli.db_path())?;
+    let store = repo::SqliteRepository::open(&cli.db_path())?;
     let output = cli.run(&store)?;
     output.emit();
 

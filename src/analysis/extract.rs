@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use tree_sitter::{Language as TsLanguage, Node, Parser, TreeCursor};
 
-use crate::model::types::EntityKind;
+use crate::domain::EntityKind;
 
 use super::languages::{self, Language};
 
