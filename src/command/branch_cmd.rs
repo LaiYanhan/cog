@@ -4,9 +4,14 @@ use chrono::Utc;
 use crate::cli::BranchAction;
 use crate::command::CommandOutput;
 use crate::format;
-use crate::model::{BranchManager, ModelDiff, Store};
+use crate::repo::SqliteRepository;
+use crate::repo::{BranchManager, ModelDiff};
 
-pub fn execute(store: &Store, mgr: &BranchManager, action: &BranchAction) -> Result<CommandOutput> {
+pub fn execute(
+    store: &SqliteRepository,
+    mgr: &BranchManager,
+    action: &BranchAction,
+) -> Result<CommandOutput> {
     match action {
         BranchAction::Create { name } => create_branch(store, mgr, name),
         BranchAction::List => list_branches(mgr),
@@ -23,7 +28,7 @@ pub fn execute(store: &Store, mgr: &BranchManager, action: &BranchAction) -> Res
 }
 
 fn create_branch(
-    store: &Store,
+    store: &SqliteRepository,
     mgr: &BranchManager,
     name: &Option<String>,
 ) -> Result<CommandOutput> {
@@ -52,19 +57,17 @@ fn list_branches(mgr: &BranchManager) -> Result<CommandOutput> {
 
 fn switch_branch(mgr: &BranchManager, name: &str) -> Result<CommandOutput> {
     if name == "_main" {
-        let active = mgr.active_branch();
-        mgr.switch_to_main(active.as_deref())?;
-        return Ok(CommandOutput::success("switched back to main"));
+        mgr.switch_to_main(mgr.active_branch().as_deref())?;
+        Ok(CommandOutput::success("switched back to main"))
+    } else {
+        mgr.switch_to_branch(name)?;
+        Ok(CommandOutput::success(format!(
+            "switched to branch: {name}"
+        )))
     }
-
-    mgr.switch_to_branch(name)?;
-    Ok(CommandOutput::success(format!(
-        "switched to branch: {name}"
-    )))
 }
-
 fn diff_branch(
-    store: &Store,
+    store: &SqliteRepository,
     mgr: &BranchManager,
     name: &str,
     item_index: Option<usize>,
@@ -104,7 +107,7 @@ fn diff_branch(
 }
 
 fn merge_branch(
-    store: &Store,
+    store: &SqliteRepository,
     mgr: &BranchManager,
     name: &str,
     apply: Option<usize>,
@@ -169,8 +172,8 @@ fn merge_branch(
     }
 }
 
-fn apply_item(store: &Store, item: &crate::model::DiffItem) -> Result<bool> {
-    use crate::model::DiffItem;
+fn apply_item(store: &SqliteRepository, item: &crate::repo::DiffItem) -> Result<bool> {
+    use crate::repo::DiffItem;
 
     match item {
         DiffItem::EntityAdded(e) => {
@@ -198,7 +201,7 @@ fn apply_item(store: &Store, item: &crate::model::DiffItem) -> Result<bool> {
             if change.before.status != change.after.status
                 && store.get_assertion(&change.before.id)?.is_some()
             {
-                use crate::model::AssertionStatus;
+                use crate::domain::AssertionStatus;
                 match change.after.status {
                     AssertionStatus::Retracted => {
                         store.retract_assertion(

@@ -1,28 +1,21 @@
 use anyhow::Result;
 
-use crate::command::{CommandOutput, infer_entity_kind};
-use crate::model::{Changelog, ChangelogAction, EntityRelationKind, Store};
+use crate::command::CommandOutput;
+use crate::domain::{ChangelogAction, EntityKind, EntityOrigin, EntityRelationKind};
+use crate::format;
+use crate::repo::Repository;
 
 pub fn execute(
-    store: &Store,
+    repo: &dyn Repository,
     entity_a: &str,
     entity_b: &str,
     kind: EntityRelationKind,
 ) -> Result<CommandOutput> {
-    let left = store.upsert_entity(
-        entity_a,
-        infer_entity_kind(entity_a),
-        crate::model::EntityOrigin::Manual,
-    )?;
-    let right = store.upsert_entity(
-        entity_b,
-        infer_entity_kind(entity_b),
-        crate::model::EntityOrigin::Manual,
-    )?;
+    let left = repo.upsert_entity(entity_a, EntityKind::infer(entity_a), EntityOrigin::Manual)?;
+    let right = repo.upsert_entity(entity_b, EntityKind::infer(entity_b), EntityOrigin::Manual)?;
 
-    store.add_entity_relation(&left.id, &right.id, kind)?;
-    Changelog::append(
-        store,
+    repo.add_entity_relation(&left.id, &right.id, kind)?;
+    repo.append_changelog(
         ChangelogAction::Depend,
         &left.id,
         &format!(
@@ -31,9 +24,8 @@ pub fn execute(
         ),
     )?;
 
-    Ok(CommandOutput::success(format!(
-        "dependency recorded\n- from: {}\n- to: {}\n- kind: {}",
-        left.qualified_name, right.qualified_name, kind
+    Ok(CommandOutput::success(format::dependency_recorded(
+        &left, &right, kind,
     )))
 }
 
@@ -43,12 +35,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{EntityRelationKind, Store};
+    use crate::domain::EntityRelationKind;
+    use crate::repo::SqliteRepository;
 
     #[test]
     fn records_entity_dependency() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
 
         let output = execute(&store, "auth::login", "AuthToken", EntityRelationKind::Uses)?;
 

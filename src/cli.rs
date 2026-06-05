@@ -4,9 +4,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::command::{self, CommandOutput};
-use crate::model::{
-    AssertionKind, BranchManager, EntityKind, EntityOrigin, EntityRelationKind, ExportFormat, Store,
-};
+use crate::domain::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind, ExportFormat};
+use crate::repo::BranchManager;
+use crate::repo::SqliteRepository;
+use crate::workflow::{WorkflowState, suggest_actions};
 
 #[derive(Debug, Parser)]
 #[command(name = "cog", about = "Cognitive model for coding agents", version)]
@@ -135,6 +136,20 @@ pub enum Commands {
         #[arg(long)]
         lang: Option<String>,
     },
+    /// Show suggested next actions based on current workflow state
+    Next,
+    /// Begin tracking a code change
+    StartChange {
+        /// Description of the change
+        description: String,
+        /// Entities expected to be affected
+        #[arg(long)]
+        entity: Vec<String>,
+    },
+    /// Finish the current change cycle
+    FinishChange,
+    /// Abort the current change cycle
+    AbortChange,
 }
 
 #[derive(Debug, Subcommand)]
@@ -188,33 +203,68 @@ impl Cli {
             .unwrap_or_else(|| PathBuf::from(".cog/cog.db"))
     }
 
-    pub fn run(&self, store: &Store) -> Result<CommandOutput> {
-        match &self.command {
-            Commands::Query { entity, all } => command::query::execute(store, entity, *all),
-            Commands::Impact { entity } => command::impact::execute(store, entity),
-            Commands::Trace { entity } => command::trace::execute(store, entity),
+    pub fn run(&self, store: &SqliteRepository) -> Result<CommandOutput> {
+        let cog_dir = self
+            .db_path()
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf();
+        // Ensure .cog/ dir exists for workflow state
+        let _ = std::fs::create_dir_all(&cog_dir);
+        let mut wf = WorkflowState::load(&cog_dir);
+
+        let result = match &self.command {
+            Commands::Query { entity, all } => {
+                let out = command::query::execute(store, entity, *all)?;
+                wf.transition_explore();
+                Ok(out)
+            }
+            Commands::Impact { entity } => {
+                let out = command::impact::execute(store, entity)?;
+                wf.transition_assess();
+                Ok(out)
+            }
+            Commands::Trace { entity } => {
+                let out = command::trace::execute(store, entity)?;
+                wf.transition_assess();
+                Ok(out)
+            }
             Commands::Index {
                 kind,
                 origin,
                 prefix,
-            } => command::index_cmd::execute(store, *kind, *origin, prefix.as_deref()),
+            } => {
+                let out = command::index_cmd::execute(store, *kind, *origin, prefix.as_deref())?;
+                wf.transition_browse();
+                Ok(out)
+            }
             Commands::Assert {
                 entity,
                 kind,
                 claim,
                 grounds,
                 depends_on,
-            } => command::assert_cmd::execute(
-                store,
-                entity,
-                *kind,
-                claim,
-                grounds,
-                depends_on.as_deref(),
-            ),
-            Commands::Retract { id, reason } => command::retract::execute(store, id, reason),
+            } => {
+                let out = command::assert_cmd::execute(
+                    store,
+                    entity,
+                    *kind,
+                    claim,
+                    grounds,
+                    depends_on.as_deref(),
+                )?;
+                wf.transition_explore();
+                Ok(out)
+            }
+            Commands::Retract { id, reason } => {
+                let out = command::retract::execute(store, id, reason)?;
+                wf.transition_retract();
+                Ok(out)
+            }
             Commands::Depend { entity_a, on, kind } => {
-                command::depend::execute(store, entity_a, on, *kind)
+                let out = command::depend::execute(store, entity_a, on, *kind)?;
+                wf.transition_explore();
+                Ok(out)
             }
             Commands::Verify {
                 scope,
@@ -231,11 +281,26 @@ impl Cli {
                 } else {
                     None
                 };
-                command::verify::execute(store, scope.as_deref(), *clean, resolved)
+                let out = command::verify::execute(store, scope.as_deref(), *clean, resolved)?;
+                let passed = out.exit_code == 0;
+                wf.transition_verify(passed);
+                Ok(out)
             }
-            Commands::Export { format } => command::export::execute(store, *format),
-            Commands::Stats => command::stats::execute(store),
-            Commands::DeleteEntity { entity } => command::entity_cmd::execute(store, entity),
+            Commands::Export { format } => {
+                let out = command::export::execute(store, *format)?;
+                wf.transition_browse();
+                Ok(out)
+            }
+            Commands::Stats => {
+                let out = command::stats::execute(store)?;
+                wf.transition_browse();
+                Ok(out)
+            }
+            Commands::DeleteEntity { entity } => {
+                let out = command::entity_cmd::execute(store, entity)?;
+                // delete-entity doesn't change state but browse is safe
+                Ok(out)
+            }
             Commands::Branch { action } => {
                 let mgr = BranchManager::new(&self.db_path());
                 command::branch_cmd::execute(store, &mgr, action)
@@ -253,8 +318,77 @@ impl Cli {
                 let lang_list: Option<Vec<String>> = lang
                     .as_ref()
                     .map(|s| s.split(',').map(|l| l.trim().to_string()).collect());
-                command::init_cmd::execute(store, &scan_path, *dry_run, *depth, lang_list)
+                let out =
+                    command::init_cmd::execute(store, &scan_path, *dry_run, *depth, lang_list)?;
+                if out.exit_code == 0 {
+                    wf.transition_init().ok(); // may fail if already init'd
+                }
+                Ok(out)
             }
-        }
+            Commands::Next => {
+                let actions = suggest_actions(&wf, store);
+                let mut text = format!("State: {}\n\nSuggested actions:\n", wf.describe());
+                for (i, a) in actions.iter().enumerate() {
+                    text.push_str(&format!(
+                        "  {}. [{}] {}\n     Why: {}\n     Example: {}\n",
+                        i + 1,
+                        action_kind_label(&a.action),
+                        a.description,
+                        a.why,
+                        a.example_command,
+                    ));
+                }
+                Ok(CommandOutput::success(text))
+            }
+            Commands::StartChange {
+                description,
+                entity,
+            } => {
+                wf.transition_start_change(description.clone(), entity.clone())?;
+                let out = CommandOutput::success(format!(
+                    "started change: {}\nState: {}",
+                    description,
+                    wf.describe()
+                ));
+                Ok(out)
+            }
+            Commands::FinishChange => {
+                wf.transition_finish_change()?;
+                Ok(CommandOutput::success(format!(
+                    "change finished.\nState: {}",
+                    wf.describe()
+                )))
+            }
+            Commands::AbortChange => {
+                wf.transition_abort_change()?;
+                Ok(CommandOutput::success(format!(
+                    "change aborted.\nState: {}",
+                    wf.describe()
+                )))
+            }
+        };
+
+        // Persist workflow state after every command
+        let _ = wf.save(&cog_dir);
+        result
+    }
+}
+
+fn action_kind_label(kind: &crate::workflow::ActionKind) -> &'static str {
+    match kind {
+        crate::workflow::ActionKind::InitProject => "init",
+        crate::workflow::ActionKind::RecordMissingContracts { .. } => "record_contracts",
+        crate::workflow::ActionKind::ReviewUncertainAssertions { .. } => "review_uncertain",
+        crate::workflow::ActionKind::StartRecording => "start_recording",
+        crate::workflow::ActionKind::AssessImpact { .. } => "assess_impact",
+        crate::workflow::ActionKind::StartChange => "start_change",
+        crate::workflow::ActionKind::VerifyChanges => "verify",
+        crate::workflow::ActionKind::RecordFix { .. } => "record_fix",
+        crate::workflow::ActionKind::FinishChange => "finish_change",
+        crate::workflow::ActionKind::AbortChange => "abort_change",
+        crate::workflow::ActionKind::TraceRootCause => "trace",
+        crate::workflow::ActionKind::VerifyConsistency => "verify",
+        crate::workflow::ActionKind::StartExperiment => "experiment",
+        crate::workflow::ActionKind::StartExperimentDuringChange => "experiment",
     }
 }

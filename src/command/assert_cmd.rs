@@ -1,10 +1,12 @@
 use anyhow::{Result, anyhow};
 
-use crate::command::{CommandOutput, infer_entity_kind};
-use crate::model::{AssertionKind, Changelog, ChangelogAction, Store};
+use crate::command::CommandOutput;
+use crate::domain::{AssertionKind, ChangelogAction, EntityKind, EntityOrigin};
+use crate::format;
+use crate::repo::Repository;
 
 pub fn execute(
-    store: &Store,
+    repo: &dyn Repository,
     entity: &str,
     kind: AssertionKind,
     claim: &str,
@@ -12,11 +14,11 @@ pub fn execute(
     depends_on: Option<&str>,
 ) -> Result<CommandOutput> {
     let resolved_depends_on = depends_on
-        .map(|id| store.resolve_assertion_id(id))
+        .map(|id| repo.resolve_assertion_id(id))
         .transpose()?;
 
-    if let Some(ref dependency_id) = resolved_depends_on {
-        let dependency = store
+    if let Some(dependency_id) = &resolved_depends_on {
+        let dependency = repo
             .get_assertion(dependency_id)?
             .ok_or_else(|| anyhow!("depends-on assertion not found: {dependency_id}"))?;
         if dependency.id != *dependency_id {
@@ -24,12 +26,9 @@ pub fn execute(
         }
     }
 
-    let entity_record = store.upsert_entity(
-        entity,
-        infer_entity_kind(entity),
-        crate::model::EntityOrigin::Manual,
-    )?;
-    let assertion = store.create_assertion(
+    let entity_record =
+        repo.upsert_entity(entity, EntityKind::infer(entity), EntityOrigin::Manual)?;
+    let assertion = repo.create_assertion(
         &entity_record.id,
         kind,
         claim,
@@ -37,28 +36,17 @@ pub fn execute(
         resolved_depends_on.as_deref(),
     )?;
 
-    Changelog::append(
-        store,
+    repo.append_changelog(
         ChangelogAction::Assert,
         &assertion.id,
         &format!("entity={} kind={} claim={}", entity, kind, claim),
     )?;
 
-    let mut out = String::new();
-    out.push_str("assertion created\n");
-    out.push_str(&format!(
-        "- id: {} ({})\n",
-        crate::format::short_id(&assertion.id),
-        assertion.id
-    ));
-    out.push_str(&format!("- entity: {}\n", entity_record.qualified_name));
-    out.push_str(&format!("- kind: {}\n", assertion.kind));
-    out.push_str(&format!("- claim: {}\n", assertion.claim));
-    if let Some(ref dep) = resolved_depends_on {
-        out.push_str(&format!("- depends_on: {}\n", crate::format::short_id(dep)));
-    }
-
-    Ok(CommandOutput::success(out))
+    Ok(CommandOutput::success(format::assertion_created(
+        &assertion,
+        &entity_record,
+        resolved_depends_on.as_deref(),
+    )))
 }
 
 #[cfg(test)]
@@ -67,12 +55,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, Store};
+    use crate::domain::AssertionKind;
+    use crate::repo::SqliteRepository;
 
     #[test]
     fn creates_assertion_and_evidence() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
 
         let output = execute(
             &store,

@@ -1,16 +1,17 @@
 use anyhow::Result;
 
 use crate::command::CommandOutput;
+use crate::domain::{EntityKind, EntityOrigin};
 use crate::format;
-use crate::model::{EntityKind, EntityOrigin, Store};
+use crate::repo::Repository;
 
 pub fn execute(
-    store: &Store,
+    repo: &dyn Repository,
     kind: Option<EntityKind>,
     origin: Option<EntityOrigin>,
     prefix: Option<&str>,
 ) -> Result<CommandOutput> {
-    let entities = store.list_entities_filtered(kind, origin, prefix)?;
+    let entities = repo.list_entities_filtered(kind, origin, prefix)?;
     Ok(CommandOutput::success(format::entity_index_with_counts(
         &entities,
     )))
@@ -22,12 +23,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{EntityKind, EntityOrigin, Store};
+    use crate::domain::{EntityKind, EntityOrigin};
+    use crate::repo::SqliteRepository;
 
     #[test]
     fn lists_entities() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         store.upsert_entity("auth", EntityKind::Module, EntityOrigin::Manual)?;
 
         let output = execute(&store, None, None, None)?;
@@ -39,7 +41,7 @@ mod tests {
     #[test]
     fn filters_by_kind() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         store.upsert_entity("auth", EntityKind::Module, EntityOrigin::Manual)?;
         store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Scan)?;
 
@@ -53,7 +55,7 @@ mod tests {
     #[test]
     fn filters_by_prefix() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         store.upsert_entity("db::connect", EntityKind::Function, EntityOrigin::Manual)?;
 

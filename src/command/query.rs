@@ -1,24 +1,24 @@
 use anyhow::{Result, anyhow};
 
 use crate::command::CommandOutput;
+use crate::domain::AssertionStatus;
 use crate::format;
-use crate::model::{AssertionStatus, Store};
+use crate::repo::Repository;
 
-pub fn execute(store: &Store, entity: &str, all: bool) -> Result<CommandOutput> {
-    let entity_record = store
+pub fn execute(repo: &dyn Repository, entity: &str, all: bool) -> Result<CommandOutput> {
+    let entity_record = repo
         .get_entity_by_name(entity)?
         .ok_or_else(|| anyhow!("entity not found: {entity}"))?;
-    let assertions = store.get_assertions_for_entity(&entity_record.id)?;
+    let assertions = repo.get_assertions_for_entity(&entity_record.id)?;
     let assertions_with_evidence = assertions
         .into_iter()
         .filter(|a| all || a.status == AssertionStatus::Active)
         .map(|assertion| {
-            let evidences = store.get_evidence_for_assertion(&assertion.id)?;
+            let evidences = repo.get_evidence_for_assertion(&assertion.id)?;
             Ok((assertion, evidences))
         })
         .collect::<Result<Vec<_>>>()?;
-    let related = store.get_related_entities(&entity_record.id)?;
-
+    let related = repo.get_related_entities(&entity_record.id)?;
     Ok(CommandOutput::success(format::query_report(
         &entity_record,
         &assertions_with_evidence,
@@ -32,12 +32,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind, Store};
+    use crate::domain::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind};
+    use crate::repo::SqliteRepository;
 
     #[test]
     fn returns_assertions_and_related_entities() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
 
         let login =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;

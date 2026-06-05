@@ -12,20 +12,6 @@ pub mod stats;
 pub mod trace;
 pub mod verify;
 
-use crate::model::EntityKind;
-
-pub(crate) fn infer_entity_kind(qualified_name: &str) -> EntityKind {
-    let symbol = qualified_name.rsplit("::").next().unwrap_or(qualified_name);
-
-    if symbol.chars().next().is_some_and(|c| c.is_uppercase()) {
-        EntityKind::Type
-    } else if qualified_name.contains("::") {
-        EntityKind::Function
-    } else {
-        EntityKind::Module
-    }
-}
-
 pub struct CommandOutput {
     pub text: String,
     pub exit_code: i32,

@@ -6,19 +6,18 @@ use anyhow::Result;
 
 use crate::analysis::{ScanConfig, Scanner};
 use crate::command::CommandOutput;
-use crate::model::{
-    AssertionStatus, Changelog, ChangelogAction, Store, VerificationIssue, VerificationIssueKind,
-};
+use crate::domain::{AssertionStatus, ChangelogAction, VerificationIssue, VerificationIssueKind};
+use crate::repo::Repository;
 
 pub fn execute(
-    store: &Store,
+    repo: &dyn Repository,
     scope: Option<&str>,
     clean: bool,
     scan_path: Option<&Path>,
 ) -> Result<CommandOutput> {
     let mut issues = Vec::new();
     let mut cleaned: usize = 0;
-    let all_entities = store.list_entities()?;
+    let all_entities = repo.list_entities()?;
     let scope_prefix = scope.unwrap_or_default();
 
     // Pre-compute full model name set for unmodeled detection (avoids re-querying)
@@ -35,8 +34,8 @@ pub fn execute(
     let checked_count = entities.len();
 
     for entity in &entities {
-        let assertions = store.get_assertions_for_entity(&entity.id)?;
-        let relation_count = store.count_relations_for_entity(&entity.id)?;
+        let assertions = repo.get_assertions_for_entity(&entity.id)?;
+        let relation_count = repo.count_relations_for_entity(&entity.id)?;
 
         let active_count = assertions
             .iter()
@@ -51,7 +50,7 @@ pub fn execute(
             });
 
             if clean {
-                store.delete_entity(&entity.qualified_name)?;
+                repo.delete_entity(&entity.qualified_name)?;
                 cleaned += 1;
             }
         }
@@ -61,7 +60,7 @@ pub fn execute(
                 continue;
             }
 
-            let evidence = store.get_evidence_for_assertion(&assertion.id)?;
+            let evidence = repo.get_evidence_for_assertion(&assertion.id)?;
             if evidence.is_empty() {
                 issues.push(VerificationIssue {
                     kind: VerificationIssueKind::MissingEvidence,
@@ -85,7 +84,7 @@ pub fn execute(
                 }
             }
 
-            for dependency in store.get_dependencies(&assertion.id)? {
+            for dependency in repo.get_dependencies(&assertion.id)? {
                 if dependency.status == AssertionStatus::Retracted {
                     issues.push(VerificationIssue {
                         kind: VerificationIssueKind::DependencyOnRetracted,
@@ -153,7 +152,7 @@ pub fn execute(
         }
 
         // Collect qualified names of auto-scanned entities (single query, no N+1)
-        let auto_scanned_names = store.get_scanned_entity_names()?;
+        let auto_scanned_names = repo.get_scanned_entity_names()?;
 
         // Stale: auto-scanned entities not found in current scan
         for name in &auto_scanned_names {
@@ -177,13 +176,12 @@ pub fn execute(
         // Clean stale entities if requested
         if clean {
             for name in &stale_names {
-                store.delete_entity(name)?;
+                repo.delete_entity(name)?;
             }
         }
     }
 
-    Changelog::append(
-        store,
+    repo.append_changelog(
         ChangelogAction::Verify,
         scope.unwrap_or("*"),
         &format!("issues={}", issues.len()),
@@ -303,12 +301,13 @@ mod tests {
 
     use super::execute;
     use crate::command::init_cmd;
-    use crate::model::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind, Store};
+    use crate::domain::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind};
+    use crate::repo::SqliteRepository;
 
     #[test]
     fn reports_isolated_entity_issue() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         store.upsert_entity("orphan", EntityKind::Module, EntityOrigin::Manual)?;
 
         let output = execute(&store, None, false, None)?;
@@ -320,7 +319,7 @@ mod tests {
     #[test]
     fn passes_when_structure_is_consistent() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         let entity =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         store.create_assertion(
@@ -351,7 +350,7 @@ mod tests {
     #[test]
     fn scan_detects_stale_entity() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
 
         // Create a Rust project with one function and init (populates store with origin=Scan)
         make_rust_project(tmp.path(), &["hello"]);
@@ -375,7 +374,7 @@ mod tests {
     #[test]
     fn scan_detects_unmodeled_definitions() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
 
         // Scan against an empty model — all definitions should be unmodeled
         make_rust_project(tmp.path(), &["alpha", "beta"]);
@@ -391,7 +390,7 @@ mod tests {
     #[test]
     fn scan_clean_removes_stale_entities() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
 
         // Create project and init
         make_rust_project(tmp.path(), &["hello"]);
@@ -418,7 +417,7 @@ mod tests {
     #[test]
     fn scoped_scan_does_not_report_out_of_scope_as_unmodeled() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
 
         // Create two source files with functions in different scopes
         let src = tmp.path().join("src");
@@ -446,7 +445,7 @@ mod tests {
     #[test]
     fn reports_dangling_grounds_when_entity_missing() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         let entity =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         store.create_assertion(
@@ -472,7 +471,7 @@ mod tests {
     #[test]
     fn passes_when_code_grounds_reference_existing_entity() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         let login =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         let validate = store.upsert_entity(

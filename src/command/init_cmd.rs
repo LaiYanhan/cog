@@ -6,8 +6,8 @@ use anyhow::Result;
 
 use crate::analysis::{Language, ScanConfig, Scanner};
 use crate::command::CommandOutput;
-use crate::model::Store;
-use crate::model::types::{EntityKind, EntityOrigin, EntityRelationKind};
+use crate::domain::{EntityKind, EntityOrigin, EntityRelationKind};
+use crate::repo::Repository;
 
 /// Strips common source-directory prefixes from a relative path, then converts
 /// `a/b/c.rs` → `a::b::c` (without extension).
@@ -41,7 +41,7 @@ fn get_kind(counts: &HashMap<String, usize>, kind: EntityKind) -> usize {
 }
 
 pub fn execute(
-    store: &Store,
+    repo: &dyn Repository,
     path: &PathBuf,
     dry_run: bool,
     max_depth: Option<usize>,
@@ -113,14 +113,14 @@ pub fn execute(
 
     // Create directory Module entities + contains hierarchy
     for dir_qname in &all_dirs {
-        let entity = store.upsert_entity(dir_qname, EntityKind::Module, EntityOrigin::Scan)?;
+        let entity = repo.upsert_entity(dir_qname, EntityKind::Module, EntityOrigin::Scan)?;
         dir_entities.insert(dir_qname.clone(), entity.id.clone());
 
         if let Some((parent, _)) = dir_qname.rsplit_once("::")
             && !parent.is_empty()
             && let Some(parent_id) = dir_entities.get(parent)
         {
-            store.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+            repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
             contains_count += 1;
         }
     }
@@ -130,7 +130,7 @@ pub fn execute(
         let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
         let file_qname = path_to_qualified(rel);
 
-        let entity = store.upsert_entity(&file_qname, EntityKind::Module, EntityOrigin::Scan)?;
+        let entity = repo.upsert_entity(&file_qname, EntityKind::Module, EntityOrigin::Scan)?;
         file_entities.insert(file_qname.clone(), entity.id.clone());
 
         // Derive parent from the original relative path, not from the qualified name,
@@ -143,7 +143,7 @@ pub fn execute(
                     .get(&parent_qname)
                     .or_else(|| file_entities.get(&parent_qname))
             {
-                store.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+                repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
                 contains_count += 1;
             }
         }
@@ -152,7 +152,7 @@ pub fn execute(
     let mut def_count: usize = 0;
 
     for def in &result.definitions {
-        let entity = store.upsert_entity(&def.qualified_name, def.kind, EntityOrigin::Scan)?;
+        let entity = repo.upsert_entity(&def.qualified_name, def.kind, EntityOrigin::Scan)?;
         def_entity_ids.insert(def.qualified_name.clone(), entity.id.clone());
         def_count += 1;
         inc_kind(&mut kind_counts, def.kind);
@@ -197,7 +197,7 @@ pub fn execute(
                 .get(pqname)
                 .or_else(|| file_entities.get(pqname))
         {
-            store.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+            repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
             contains_count += 1;
         }
     }
@@ -227,7 +227,7 @@ pub fn execute(
 
         // Resolve the import's module_path as a direct entity
         if let Some(target_id) = def_entity_ids.get(&import.module_path) {
-            store.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
+            repo.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
             uses_count += 1;
         }
 
@@ -235,7 +235,7 @@ pub fn execute(
         for name in &import.imported_names {
             let qualified = format!("{}::{}", import.module_path, name);
             if let Some(target_id) = def_entity_ids.get(&qualified) {
-                store.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
+                repo.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
                 uses_count += 1;
             }
         }

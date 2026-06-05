@@ -2,10 +2,10 @@ use anyhow::Result;
 
 use crate::command::CommandOutput;
 use crate::format;
-use crate::model::Store;
+use crate::repo::Repository;
 
-pub fn execute(store: &Store) -> Result<CommandOutput> {
-    let stats = store.stats()?;
+pub fn execute(repo: &dyn Repository) -> Result<CommandOutput> {
+    let stats = repo.stats()?;
     Ok(CommandOutput::success(format::stats_report(&stats)))
 }
 
@@ -15,12 +15,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, EntityKind, EntityOrigin, Store};
+    use crate::domain::{AssertionKind, EntityKind, EntityOrigin};
+    use crate::repo::SqliteRepository;
 
     #[test]
     fn returns_model_stats() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         let entity =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         store.create_assertion(

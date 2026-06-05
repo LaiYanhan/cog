@@ -2,10 +2,11 @@ use anyhow::Result;
 
 use crate::command::CommandOutput;
 use crate::format;
-use crate::model::{Store, TraceResult};
+use crate::repo::Repository;
+use crate::space::TraceEngine;
 
-pub fn execute(store: &Store, entity: &str) -> Result<CommandOutput> {
-    let trace = TraceResult::trace(store, entity)?;
+pub fn execute(repo: &dyn Repository, entity: &str) -> Result<CommandOutput> {
+    let trace = TraceEngine::trace(repo, entity)?;
     Ok(CommandOutput::success(format::trace_report(&trace)))
 }
 
@@ -15,12 +16,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, EntityKind, EntityOrigin, Store};
+    use crate::domain::{AssertionKind, EntityKind, EntityOrigin};
+    use crate::repo::SqliteRepository;
 
     #[test]
     fn reports_trace_tree() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         let entity =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         let root = store.create_assertion(

@@ -2,11 +2,12 @@ use anyhow::Result;
 
 use crate::command::CommandOutput;
 use crate::format;
-use crate::model::{CascadeResult, Store};
+use crate::repo::SqliteRepository;
+use crate::space::CascadeEngine;
 
-pub fn execute(store: &Store, id: &str, reason: &str) -> Result<CommandOutput> {
+pub fn execute(store: &SqliteRepository, id: &str, reason: &str) -> Result<CommandOutput> {
     let resolved = store.resolve_assertion_id(id)?;
-    let result = CascadeResult::retract(store, &resolved, reason)?;
+    let result = CascadeEngine::retract(store, &resolved, reason)?;
     Ok(CommandOutput::success(format::cascade_report(&result)))
 }
 
@@ -16,12 +17,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::model::{AssertionKind, EntityKind, EntityOrigin, Store};
+    use crate::domain::{AssertionKind, EntityKind, EntityOrigin};
+    use crate::repo::SqliteRepository;
 
     #[test]
     fn retracts_and_reports_affected_assertions() -> Result<()> {
         let tmp = tempdir()?;
-        let store = Store::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         let entity =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         let base = store.create_assertion(
