@@ -133,28 +133,22 @@ impl WorkflowState {
             }
             WorkflowState::Ready {
                 phase: WorkflowPhase::Debugging,
-            } => {
-                if passed {
-                    *self = WorkflowState::Ready {
-                        phase: WorkflowPhase::Exploring,
-                    };
-                }
-                // fail → stay Debugging
+            } if passed => {
+                *self = WorkflowState::Ready {
+                    phase: WorkflowPhase::Exploring,
+                };
             }
+            // fail → stay Debugging
             _ => {}
         }
     }
 
     /// After `retract` — always enters Debugging.
     pub fn transition_retract(&mut self) {
-        match self {
-            WorkflowState::Ready { .. } => {
-                *self = WorkflowState::Ready {
-                    phase: WorkflowPhase::Debugging,
-                };
-            }
-            // Changing stays Changing (retract within a change is fine)
-            _ => {}
+        if let WorkflowState::Ready { .. } = self {
+            *self = WorkflowState::Ready {
+                phase: WorkflowPhase::Debugging,
+            };
         }
     }
 
