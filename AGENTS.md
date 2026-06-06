@@ -25,8 +25,8 @@ Cog is organized into six layers, bottom-up: **code space** (the source code bei
 
 ### Data Flow (per command)
 
-1. `cli.rs` parses args (Clap derive)
-2. Dispatches to `command/<module>::execute(repo, args)` where `repo` is `&dyn Repository` (or `&SqliteRepository` for retract/branch)
+1. `cli/mod.rs` parses args (Clap derive)
+2. Dispatches to `command/<module>::execute(repo, args)` where `repo` is `&dyn Repository` (or `&SqliteRepository` for retract)
 3. Execute reads/mutates through the `Repository` trait, produces a `CommandOutput { text, exit_code }`
 4. `main.rs` calls `output.emit()` and exits with `exit_code` if non-zero
 
@@ -35,26 +35,25 @@ Cog is organized into six layers, bottom-up: **code space** (the source code bei
 - **No async** — everything is synchronous. The tree-sitter parsing and SQLite operations are fast enough.
 - **anyhow::Result** everywhere — no custom error types. Preconditions use `bail!()` / `anyhow!()`.
 - **Repository trait** decouples commands from storage — single `SqliteRepository` impl, tests use `open_in_memory()` for real SQL semantics without disk I/O
-- **Output formatting** centralized in `format/` module with `TextRenderer` struct — commands build data, renderer produces plain text
+- **Output formatting** centralized in `format/` module — `Renderable` trait routes reports to `TextRenderer` (human-readable) or `JsonRender` (machine-readable) via `--output` flag
 - **Workflow state machine** guides agent via `cog next` — serialized to `.cog/workflow_state.json`; tracks Uninit → Ready → Changing transitions
 - **Short IDs** — UUIDs displayed as first 8 chars; resolved automatically across all commands.
 
 ## Key Directories
 
-| `src/main.rs` | Entry point — opens SqliteRepository, dispatches CLI |
-| `src/cli.rs` | Clap-derived CLI definition, workflow state management |
+| `src/cli/` | Clap-derived CLI definition (mod, args, experiment, backup), workflow state management |
+| `src/repo/` | Repository trait + SqliteRepository (split into 10 submodules) |
 | `src/domain/` | Core types: entity, assertion, evidence, relations, grounds, reports |
-| `src/repo/` | Repository trait + SqliteRepository + BranchManager + ModelDiff |
-| `src/command/` | One file per subcommand: most accept `&dyn Repository`, retract/branch accept `&SqliteRepository` |
-| `src/space/` | Graph algorithms: CascadeEngine, ImpactEngine, TraceEngine |
+| `src/command/` | One file per subcommand: most accept `&dyn Repository`, retract accepts `&SqliteRepository` |
+| `src/space/` | Graph algorithms: CascadeEngine, ImpactEngine, TraceEngine, SemanticSpace, StructureSpace |
 | `src/workflow/` | WorkflowState state machine + suggestion engine |
 | `src/format/` | TextRenderer — unified text output for all reports |
-| `src/analysis/` | Tree-sitter scanning (unchanged) |
-| `tests/` | Integration + unit tests (35 total) |
+| `src/analysis/` | Tree-sitter scanning: Scanner, ParserPool, FileWalker, language extractors |
+| `tests/` | Integration + unit tests (24 total) |
 | `benchmark/` | Harbor Terminus-2 benchmark harness for A/B evaluation |
 | `skills/cog/` | Skill documentation for agent runtime |
-| `docs/` | Design documents |
-
+| `src/experiment/` | Hypothesis experiment: session, ops, report, persistence |
+| `src/backup/` | Full model backup: BackupManager (create/list/restore/drop) |
 ## Development Commands
 
 ```sh
@@ -63,7 +62,7 @@ cargo build --release          # produces target/release/cog
 cargo build                     # debug build
 
 # Test
-cargo test                      # runs integration tests (3 tests, subprocess-based)
+cargo test                      # runs tests (subprocess-based)
 
 # Run
 cargo run -- init .             # scan current dir
@@ -87,8 +86,7 @@ cargo run -- backup create --name <name> -- create a full model backup
 src/command/<name>.rs
   pub fn execute(repo: &dyn Repository, <specific_args>) -> Result<CommandOutput>
 ```
-
-Every command module exports exactly one public `execute()` function. Most accept `&dyn Repository`; retract and branch accept `&SqliteRepository`.
+Every command module exports exactly one public `execute()` function. Most accept `&dyn Repository`; retract accepts `&SqliteRepository`.
 
 ### Error Handling
 
@@ -121,26 +119,30 @@ Every command module exports exactly one public `execute()` function. Most accep
 | `space/impact.rs` | `ImpactEngine` | BFS — find all entities downstream of a given entity |
 | `space/trace.rs` | `TraceEngine` | Recursive DFS — build dependency tree (cycle protection via visited set) |
 
-### Branching
+### Experiment
 
-- Branches are **full SQLite DB copies** via `VACUUM INTO`.
-- Active branch tracked by a filesystem marker file (`.active_branch`).
-- Merge preserves UUIDs (no ID re-generation). Entity removals skipped (would break cross-references). Assertion removals become retractions, not deletions.
+- Experiments test "what if" scenarios on lightweight in-memory snapshots (BFS subgraph, max 500 nodes).
+- Persisted to `.cog/experiments/<id>.json` for cross-session recovery.
+- Draft (unsaved) vs saved checkpoint semantics; `list` distinguishes them.
+- Commit replays staged operations deterministically to the real DB — no diff-merge.
+
+### Backup
+
+- Full DB snapshot via `VACUUM INTO` for safety nets before large-scale refactors.
+- BackupManager: `create`/`list`/`restore`/`drop`.
 - Reserved names: `_main`, `_main_backup`.
 
 ### Testing
 
 - **No test framework** beyond `#[test]`. No rstest, test-case, or mocks.
-- Tests invoke the **compiled binary** via `std::process::Command` — true black-box end-to-end.
-- Each test creates a **tempdir** + fresh SQLite DB path, chains multiple CLI invocations via `run_ok()`, and asserts on stdout content.
+- Three integration tests: happy path workflow, retraction cascade verification. Plus unit tests in command/ and repo/ modules.
+- Unit tests in command/repo modules use `SqliteRepository::open_in_memory()`.
 - Helper: `cog_bin()` reads `CARGO_BIN_EXE_cog` env var (set by `cargo test`).
 - Pattern: `let output = run_ok(&["init", "."], &db_path)` → assert stdout contains expected text.
-- Three integration tests: happy path workflow, retraction cascade verification, branch lifecycle. Plus 32 unit tests.
-- Unit tests in command modules use `SqliteRepository::open()` with tempdir.
 
 ### Scan/Analysis
 
-- `Scanner::scan(ScanConfig)` returns `ScanResult { files, definitions, imports, languages }`.
+- `Scanner::new().scan(ScanConfig)` returns `ScanReport { files, definitions, imports, languages }`.
 - BFS directory walk, skips hidden dirs, `target/`, `node_modules/`, `__pycache__/`.
 - Per-language extractors are free functions matching tree-sitter node kinds:
   - Python: `function_definition`, `class_definition`, `import_statement`, `import_from_statement`
@@ -153,28 +155,26 @@ Every command module exports exactly one public `execute()` function. Most accep
 
 ## Important Files
 
-| `src/repo/sqlite.rs` | SqliteRepository — SQLite CRUD, 1400 lines, the largest file |
+| `src/repo/sqlite/` | SqliteRepository — split into 10 focused submodules |
 | `src/repo/trait.rs` | Repository trait — persistence contract |
-| `src/domain/entity.rs` | Entity, EntityKind, EntityOrigin |
+| `src/domain/entity.rs` | Entity, EntityKind, EntityOrigin, last_segment(), parent_qname() |
 | `src/domain/assertion.rs` | Assertion, AssertionKind, AssertionStatus |
-| `src/space/cascade.rs` | Retraction cascade (CascadeEngine) |
+| `src/space/cascade.rs` | Retraction cascade — two-phase: SemanticSpace + Repository |
 | `src/space/impact.rs` | Downstream impact analysis (ImpactEngine) |
 | `src/space/trace.rs` | Dependency tracing (TraceEngine) |
+| `src/space/semantic.rs` | SemanticSpace — TMS belief system, simulate_retract, assess_risk |
+| `src/space/structure.rs` | StructureSpace — entity graph with BFS traversal |
 | `src/workflow/state.rs` | WorkflowState machine + transitions |
 | `src/workflow/suggestions.rs` | Suggestion engine for cog next |
-| `src/format/text.rs` | TextRenderer — all output rendering |
+| `src/format/text.rs` | TextRenderer — human-readable output |
+| `src/format/json.rs` | JsonRender — machine-readable JSON output |
 | `src/command/verify.rs` | Structural consistency checks |
 | `src/command/init_cmd.rs` | Tree-sitter scanning orchestration |
-| `src/repo/branch.rs` | BranchManager — snapshot management |
-| `src/repo/diff.rs` | ModelDiff — snapshot comparison |
 | `src/domain/metrics.rs` | EntityMetrics — fan_in, fan_out, line_count, visibility |
 | `src/experiment/session.rs` | Experiment session with BFS subgraph loading |
-| `src/backup/manager.rs` | BackupManager wrapper around DB copy |
+| `src/backup/manager.rs` | BackupManager wrapper around VACUUM INTO |
 
 ## Runtime/Tooling Preferences
-
-- **Rust toolchain**: Edition 2024 requires Rust ≥1.85. No nightly features.
-- **Package manager**: Cargo only.
 - **No build script** (`build.rs` absent).
 - **No formatter/linter config** — rustfmt and clippy use defaults.
 - **Single binary** — no lib target, no workspace.
@@ -182,12 +182,11 @@ Every command module exports exactly one public `execute()` function. Most accep
 - **Gitignore** covers: `/target`, `.omp/`, `.cog/`, `__pycache__/`, `*.pyc`, `terminal-bench/`, `jobs/`.
 
 ## Testing & QA
-
 - **Framework**: `#[test]` + `std::process::Command` for black-box CLI tests.
+- **Coverage**: integration tests exercising: full CRUD workflow, retraction cascade with verification.
 - **Isolation**: Fresh tempdir + temp DB per test. No shared state.
-- **Coverage**: 3 integration tests exercising: full CRUD workflow, retraction cascade with verification, branch lifecycle.
 - **Running**: `cargo test` (builds binary, runs integration tests).
-- **3 integration tests + 32 unit tests** — integration tests are end-to-end through the binary interface; unit tests exercise individual modules.
+- Integration tests are end-to-end through the binary interface; unit tests exercise individual modules.
 - **Test helpers**: `cog_bin()`, `run(args, db_path)`, `run_ok(args, db_path)`, `parse_assertion_id(output)`.
 - **Error testing**: Commands with `bail!()` failures cause subprocess non-zero exit → caught by `run()` return value.
 
@@ -239,7 +238,7 @@ cargo run -- verify --scan
 | Scenario | Assertion Kind | Example |
 |----------|---------------|---------|
 | Understanding a module's API contract | `contract` | `"SqliteRepository::open creates DB in WAL mode, returns Err on I/O failure"` |
-| Noting a design decision or rationale | `intent` | `"Branch merge skips entity removals to prevent broken cross-references"` |
+| Noting a design decision or rationale | `intent` | `"Experiment commit replays staged operations deterministically — no diff-merge"` |
 | A constraint that must hold | `invariant` | `"CascadeEngine::retract() BFS never revisits already-marked assertions"` |
 | Something fragile or risky | `fragility` | `"Node text extraction assumes tree-sitter node is within source bounds — panics if not"` |
 | A fix applied during this session | `correction` | `"Fixed off-by-one in path_to_qualified — was dropping first segment"` |
@@ -264,17 +263,16 @@ This project's self-bootstrapping creates a unique feedback loop: **modeling cog
 │  3. Record the problem as a fragility assertion    │
 │     → cog assert <entity> --kind fragility ...     │
 │                                                    │
-│  4. Branch and prototype the fix                   │
-│     → cog branch create --name fix-<issue>         │
-│     → cog branch switch fix-<issue>                │
-│     → Record the improvement as assertions         │
+│  4. Experiment or prototype the fix                │
+│     → cog experiment start <entity> --desc "..."   │
+│     → cog experiment hypothesize <id> --assert ... │
+│     → cog experiment evaluate <id>                 │
 │     → Implement the code change                    │
 │                                                    │
-│  5. Diff, validate, merge                          │
-│     → cog branch switch _main                      │
-│     → cog branch diff fix-<issue>                  │
+│  5. Validate, commit, merge                        │
 │     → Run tests, verify                            │
-│     → cog branch merge fix-<issue> --apply-all     │
+│     → cog experiment commit <id>                   │
+│     → Or: cog backup create before large changes   │
 │                                                    │
 │  6. Retract the old fragility, assert correction   │
 │     → cog retract <old-fragility-id>               │
@@ -286,54 +284,47 @@ This project's self-bootstrapping creates a unique feedback loop: **modeling cog
 
 | What you feel | The meta-loop action |
 |---------------|---------------------|
-| Output is hard to parse or too verbose | Assert `format::*` fragility → branch to add `--json` or `--quiet` flag → implement → merge |
-| Can't batch-record many assertions at once | Assert `command::assert_cmd` fragility → branch to add bulk-assert or `--file` flag → implement → merge |
-| `verify` misses a specific issue pattern | Assert `command::verify::execute` fragility → branch to add the check → implement → merge |
-| `init` scanned too much noise (e.g. benchmark/) | Assert `analysis::extract::Scanner::scan` fragility → branch to add better skip patterns or `.cogignore` → implement → merge |
-| Branch diff is confusing or incomplete | Assert `repo::diff::ModelDiff` fragility → branch to improve diff output → implement → merge |
-| Missing a command or flag that would make your workflow smoother | Assert the relevant module's `intent` with `"would benefit from <feature>"` → branch to design and implement → merge |
-| A graph algorithm is too slow for a real codebase | Assert `space::cascade` fragility → branch to optimize → benchmark → merge |
+| Output is hard to parse or too verbose | Assert `format::*` fragility → experiment to add `--json` or `--quiet` flag → implement → commit |
+| Can't batch-record many assertions at once | Assert `command::assert_cmd` fragility → experiment to add bulk-assert or `--file` flag → implement → commit |
+| `verify` misses a specific issue pattern | Assert `command::verify::execute` fragility → experiment to add the check → implement → commit |
+| `init` scanned too much noise (e.g. benchmark/) | Assert `analysis::Scanner::scan` fragility → experiment to add better skip patterns or `.cogignore` → implement → commit |
+| Missing a command or flag | Assert the relevant module's `intent` with `"would benefit from <feature>"` → experiment to design and implement → commit |
+| A graph algorithm is too slow for a real codebase | Assert `space::cascade` fragility → experiment to optimize → benchmark → commit |
 
 ### Rules of the Meta-Loop
 
 - **Every friction point must be captured as an assertion** — `fragility` for the problem, `correction` after the fix. Future agents learn from past pain.
-- **Use branches for every prototype** — never modify the main model directly when experimenting with improvements to cog itself. The branch preserves a clean diff and lets you revert cleanly.
-- **Ground the improvement design on the branch** — use `plan:*` grounds for assertions that describe the *planned* improvement, migrate to `code:*` after implementation (same as the "From Scratch" workflow).
-- **If the improvement changes the schema or breaks compatibility** — follow [Data Preservation During Breaking Changes](#data-preservation-during-breaking-changes) above. Branch first, migrate, never destroy.
-- **When the meta-loop reveals a fundamental design limitation** (not just a missing feature) — assert it as an `intent` limitation on the affected module, then branch a more thorough redesign. The branch diff documents the evolution of the design.
+- **Use experiments for prototypes** — never modify the main model directly when experimenting with improvements to cog itself. Experiment snapshots are lightweight and discardable.
+- **Use backups for large-scale changes** — `cog backup create --name pre-refactor` before schema or architecture changes.
+- **Ground the improvement design** — use `plan:*` grounds for assertions that describe the *planned* improvement, migrate to `code:*` after implementation.
+- **When the meta-loop reveals a fundamental design limitation** — assert it as an `intent` limitation on the affected module, then experiment with a redesign.
 
 ### Example: Discovering and Fixing a Limitation
 
 ```sh
-# Step 1: While modeling cog, you notice `cog index` output is hard to grep
+# Step 1: Record the friction as a fragility
 cog assert format::entity_index_with_counts --kind fragility \
   --claim "Output uses aligned columns that are hard to parse programmatically" \
   --grounds "meta-loop:cog-self-modeling"
 
-# Step 2: Branch and design the fix
-cog branch create --name add-index-json-flag
-cog branch switch add-index-json-flag
-cog assert command::index_cmd::execute --kind intent \
-  --claim "Should support --json flag for machine-parseable output" \
-  --grounds "plan:improvement"
+# Step 2: Experiment with a fix
+cog experiment start format::text::TextRenderer --desc "add --json flag for index"
+cog experiment hypothesize <id> --assert command::index_cmd::execute \
+    --kind intent --claim "Should support --json flag for machine-parseable output" \
+    --grounds "plan:improvement"
 
 # Step 3: Implement the change in src/command/index_cmd.rs and src/format/text.rs
-# (actual code changes happen here)
 
-# Step 4: Return to main, review, merge
-cog branch switch _main
-cog branch diff add-index-json-flag
+# Step 4: Validate and commit
 cargo test
-cog branch merge add-index-json-flag --apply-all
+cog verify
+cog experiment commit <id>
 
 # Step 5: Record the correction
 cog retract <old-fragility-id> --reason "implemented --json flag for index command"
 cog assert format --kind correction \
   --claim "Added --json output mode to index command for programmatic consumption" \
   --grounds "code:command::index_cmd::execute"
-
-# Cleanup
-cog branch drop add-index-json-flag
 ```
 
 ## Data Preservation During Breaking Changes
@@ -342,14 +333,12 @@ Cog is under active development. Schema changes, query interface changes, or sto
 
 ### Migration Strategy (not destructive reset)
 
-When a code change breaks compatibility with existing stored data:
-
-1. **Branch first** — snapshot the current model before any migration code runs:
+1. **Backup first** — snapshot the current model before any migration code runs:
    ```sh
-   cargo run -- branch create --name pre-migration
+   cargo run -- backup create --name pre-migration
    ```
 
-2. **Write a migration** — the `SqliteRepository` already supports schema migrations (the `origin` column was added via migration). Add a new migration in `repo/sqlite.rs` that:
+2. **Write a migration** — the `SqliteRepository` already supports schema migrations. Add a new migration in `repo/sqlite/helpers.rs` that:
    - Checks current schema version (table exists, column exists, or a `pragma user_version` / schema version marker)
    - Alters tables additively (add columns, create new tables) — NEVER `DROP TABLE` or `DROP COLUMN`
    - Transforms existing data in-place or provides backward-compatible defaults for new columns
@@ -363,16 +352,15 @@ When a code change breaks compatibility with existing stored data:
    ```sh
    cargo run -- stats                    # entity/assertion counts intact
    cargo run -- verify                   # no spurious issues from migration
-   cargo run -- branch list              # branches preserved
+   cargo run -- backup list              # backups preserved
    cargo run -- export --format json     # full data export readable
    ```
 
 ### What "Preserve Data" Means
 
 - **All entities, assertions, evidence, and relations** must remain readable after migration. No silent data loss.
-- **UUIDs must be stable** — changing ID generation breaks cross-references in branches and the changelog.
-- **Branch snapshots** (separate DB files) must remain loadable. If the schema changes, old branch files must be migratable on open, not rejected.
-- **Changelog must be append-only** — never rewrite or truncate the changelog. It is the audit trail.
+- **UUIDs must be stable** — changing ID generation breaks cross-references in backup snapshots and the changelog.
+- **Backup snapshots** (separate DB files) must remain loadable. If the schema changes, old backup files must be migratable on open, not rejected.
 - **If backward compatibility is impossible**, use `VACUUM INTO` to create a migrated copy and keep the original file as a backup — never in-place destroy.
 
 ### Prohibited Actions

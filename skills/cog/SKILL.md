@@ -1,6 +1,6 @@
 ---
 name: cog
-description: "Cognitive model CLI for LLM coding agents. Use when the agent needs to record, query, or reason about codebase knowledge: contracts, invariants, dependencies, fragility points. Activated by: cog assert/retract/query/impact/trace/depend/verify/export/stats/index/delete-entity/branch commands."
+description: "Cognitive model CLI for LLM coding agents. Use when the agent needs to record, query, or reason about codebase knowledge: contracts, invariants, dependencies, fragility points. Activated by: cog assert/retract/query/impact/trace/depend/verify/export/stats/index/delete-entity/experiment/backup commands."
 ---
 
 # cog — Cognitive Model for Coding Agents
@@ -9,6 +9,7 @@ description: "Cognitive model CLI for LLM coding agents. Use when the agent need
 SQLite database (`.cog/cog.db`, gitignored). Record what you know about code
 — contracts, invariants, intent, fragility — track dependencies between
 those claims, and reason about impact when things change.
+
 
 ## Core Concepts
 
@@ -73,17 +74,23 @@ accepting IDs resolve short IDs automatically.
 | `cog verify [--scope <entity>] [--clean] [--scan]` | Structural consistency check. `--scan` also compares the model against the actual codebase, reporting unmodeled and stale entities. |
 | `cog export [--format json\|toml\|dot]` | Export model in machine-readable format |
 
-### Branching
+### Experiment & Backup
 
 | Command | Purpose |
 |---------|---------|
-| `cog branch create [--name <name>]` | Snapshot current model into a branch |
-| `cog branch list` | List all branches |
-| `cog branch switch <name>` | Activate branch for editing |
-| `cog branch switch _main` | Return to main (saves branch state) |
-| `cog branch diff <name> [--item <N>]` | Diff main vs branch changes |
-| `cog branch merge <name> [--apply-all\|--apply <N>\|--reject <N>]` | Merge branch changes into main |
-| `cog branch drop <name>` | Delete branch file |
+| `cog experiment start <entity> --desc "<desc>"` | Start hypothesis experiment on in-memory snapshot |
+| `cog experiment hypothesize <id> --assert ...` | Inject hypothetical assertion |
+| `cog experiment hypothesize <id> --delete <entity>` | Inject hypothetical entity deletion |
+| `cog experiment evaluate <id>` | Evaluate impact of staged operations |
+| `cog experiment report <id>` | Show full experiment report |
+| `cog experiment save <id>` | Mark experiment as saved checkpoint |
+| `cog experiment commit <id>` | Replay staged operations to real model |
+| `cog experiment discard <id>` | Discard experiment |
+| `cog experiment list` | List all experiments (draft/saved) |
+| `cog backup create --name <name>` | Full DB snapshot (VACUUM INTO) |
+| `cog backup list` | List all backups |
+| `cog backup restore <name>` | Restore backup as active model |
+| `cog backup drop <name>` | Delete backup file |
 
 ## Assertion Kinds
 
@@ -115,18 +122,10 @@ Override: `--db <path>` or `COG_DB` environment variable.
 
 ---
 
-## When to Use Which Guide
+## Further Reading
 
-| Situation | Guide |
-|-----------|-------|
-| Encountering an unfamiliar codebase (with existing code) | [WORKFLOWS.md — Analyzing & Debugging](WORKFLOWS.md#analyzing--debugging-an-existing-codebase) |
-| Starting a new project (no code yet) | [WORKFLOWS.md — From Scratch](WORKFLOWS.md#starting-a-new-project-from-scratch) |
-| Understanding unfamiliar existing code | [WORKFLOWS.md — Retrofitting](WORKFLOWS.md#after-reading-unfamiliar-code-retrofitting) |
-| Planning a risky refactor | [WORKFLOWS.md — Risky Refactor](WORKFLOWS.md#before-a-risky-refactor) |
-| Found a subtle trap in the code | [WORKFLOWS.md — Subtle Trap](WORKFLOWS.md#when-you-find-a-subtle-trap) |
-| Retracting outdated knowledge | [WORKFLOWS.md — Retracting](WORKFLOWS.md#when-retracting-outdated-knowledge) |
-| Learned from a mistake | [WORKFLOWS.md — Correction](WORKFLOWS.md#when-you-learn-from-a-mistake) |
-| Linking entities during exploration | [WORKFLOWS.md — Linking Entities](WORKFLOWS.md#linking-entities-during-architecture-exploration) |
-| Grounds lifecycle (plan → code migration) | [WORKFLOWS.md — Progressive Grounding](WORKFLOWS.md#progressive-grounding-lifecycle) |
-| Branch / merge / sandbox experiments | [BRANCHING.md](BRANCHING.md) |
-| Modelling best practices & anti-patterns | [BEST_PRACTICES.md](BEST_PRACTICES.md) |
+| Guide | Content |
+|-------|---------|
+| [WORKFLOWS.md](WORKFLOWS.md) | Structural scan + semantic deepening, progressive grounding lifecycle |
+| [BEST_PRACTICES.md](BEST_PRACTICES.md) | Anti-patterns, assertion/relation kind reference |
+| [BRANCHING.md](BRANCHING.md) | Experiment hypothesis testing, backup snapshots |

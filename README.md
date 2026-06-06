@@ -132,62 +132,85 @@ Workflow commands:
 |---|---|
 | `cog next` | Show suggested actions given current workflow state |
 | `cog start-change "<desc>"` | Begin a tracked change cycle |
-| `cog start-change "<desc>" --entity <name>` | Also declare affected entities |
-| `cog finish-change` | Complete the change cycle and return to Ready |
+| `cog start-change "<desc>"` | Begin a tracked change cycle |
 | `cog abort-change` | Abandon the change cycle and return to Ready |
 
 Typical cycle: `cog next` → `cog start-change "..."` → make code changes →
 `cog verify --scan` → `cog assert` (record what you learned) → `cog finish-change`.
 
-Use the workflow state machine for lightweight hypothesis testing and
-day-to-day change tracking. For deep speculative exploration with full
-model sandboxing, use branches (see below).
+
+For deep speculative exploration, use experiments or full backups (see below).
 
 
-### Branch workflow (speculative sandbox)
+### Experiment workflow (hypothesis testing)
 
-Branches create a full sandbox copy of the model for deep speculative exploration.
-For lightweight hypothesis testing and day-to-day change tracking, prefer the
-workflow state machine (`cog start-change` / `cog verify` / `cog finish-change`)
-above.
+Experiments test "what if" scenarios on a lightweight in-memory snapshot
+without copying the entire database.
 
 ```sh
-# Snapshot current model
-cog branch create --name my-plan
+# Start an experiment around a focal entity
+cog experiment start auth::login --desc "what if login takes 3 params?"
 
-# Switch to sandbox (all subsequent commands affect only the copy)
-cog branch switch my-plan
+# Inject hypothetical operations
+cog experiment hypothesize <id> --assert auth::login \
+    --kind contract --claim "now accepts (user, pass, rate_limit)" \
+    --grounds "hypothesis:rate-limit-feature"
 
-# Freely experiment — assert/retract/depend without risk
-cog assert new::feature --kind intent --claim "planned feature" --grounds "plan:design-doc"
-cog retract d6e3a49f --reason "outdated assumption"
+# Evaluate impact
+cog experiment evaluate <id>
 
-# Return to main, diff to see what changed, then merge
-cog branch switch _main
-cog branch diff my-plan
-cog branch merge my-plan --apply-all
+# Save as checkpoint for cross-session recovery
+cog experiment save <id>
 
-# Clean up
-cog branch drop my-plan
+# Commit (replay staged ops to real DB) or discard
+cog experiment commit <id>
+cog experiment discard <id>
+
+# List all experiments
+cog experiment list
 ```
 
-Branch commands:
+Experiment commands:
 
 | Command | Description |
 |---|---|
-| `cog branch create [--name <name>]` | Snapshot current model (auto-named if omitted) |
-| `cog branch list` | List all branches |
-| `cog branch switch <name>` | Activate a branch for editing |
-| `cog branch switch _main` | Return to main (saves branch state) |
-| `cog branch diff <name>` | Changes since branch creation |
-| `cog branch diff <name> --item <N>` | Inspect a specific change in detail |
-| `cog branch merge <name>` | Show merge plan |
-| `cog branch merge <name> --apply-all` | Apply all changes to main |
-| `cog branch merge <name> --apply <N>` | Apply one change |
-| `cog branch merge <name> --reject <N>` | Reject one change |
-| `cog branch drop <name>` | Delete branch file |
+| `cog experiment start <entity> --desc "<desc>"` | Start hypothesis experiment |
+| `cog experiment hypothesize <id> --assert ...` | Inject hypothetical assertion |
+| `cog experiment hypothesize <id> --delete <entity>` | Inject hypothetical entity deletion |
+| `cog experiment evaluate <id>` | Evaluate impact of staged operations |
+| `cog experiment report <id>` | Show full experiment report |
+| `cog experiment save <id>` | Mark as saved checkpoint |
+| `cog experiment commit <id>` | Replay staged ops to real model |
+| `cog experiment discard <id>` | Discard experiment |
+| `cog experiment list` | List all experiments (draft/saved) |
 
-Merge semantics: UUIDs are preserved so cross-references stay valid. Entity removals are skipped to avoid broken references. Items verified against existing IDs; skips reported in summary.
+
+### Backup workflow (full model snapshots)
+
+For large-scale refactors, create a full DB snapshot as a safety net.
+
+```sh
+# Snapshot before a major change
+cog backup create --name "before-refactor"
+
+# List backups
+cog backup list
+
+# Restore if needed
+cog backup restore "before-refactor"
+
+# Clean up
+cog backup drop "before-refactor"
+```
+
+Backup commands:
+
+| Command | Description |
+|---|---|
+| `cog backup create --name <name>` | Full DB snapshot via VACUUM INTO |
+| `cog backup list` | List all backups |
+| `cog backup restore <name>` | Restore backup as active model |
+| `cog backup drop <name>` | Delete backup file |
 
 ## Assertion Kinds
 
@@ -218,7 +241,8 @@ Do **not** use `depends_on` for entity relations — that is an assertion-level 
 - **Evidence** — source material backing an assertion (code reference, manual review, test)
 - **Dependency** — assertion-level `depends-on` chain; when a base assertion is retracted, dependents cascade to `uncertain` (TMS-style truth maintenance)
 - **Retraction** — marks an assertion as retracted and cascades `uncertain` to dependent assertions that have no other active support
-- **Branch** — snapshot-based sandbox for speculative reasoning; merge preserves UUIDs
+- **Experiment** — lightweight hypothesis testing on in-memory snapshots; commit replays staged operations to the real model
+- **Backup** — full DB snapshot (VACUUM INTO) for safety nets before large-scale refactors
 - **Scan** — tree-sitter based code structure analysis. `cog init` walks directories, parses files into ASTs, extracts functions/classes/methods/types, and creates entities + `contains` relations. All auto-created entities are grounded `auto:scan`, clearly separated from LLM-authored knowledge.
 
 ## Ids
