@@ -1,5 +1,4 @@
 // Domain types — the core data model.
-// Methods marked #[allow(dead_code)] are forward-looking and will be wired as features land.
 
 pub mod assertion;
 pub mod changelog;
@@ -20,6 +19,7 @@ pub use relations::{
     RelationDirection,
 };
 pub use report::{
-    AffectedAssertion, CascadeReason, CascadeReport, ExportFormat, ImpactCard, ModelSnapshot,
-    ModelStats, TraceAssertion, TraceTree, VerificationIssue, VerificationIssueKind,
+    AffectedAssertion, CascadeReason, CascadeReport, EntityIndex, ExportFormat, ImpactCard,
+    InitReport, ModelSnapshot, ModelStats, QueryCard, StatusMessage, TraceAssertion, TraceTree,
+    VerificationIssue, VerificationIssueKind, VerificationReport,
 };

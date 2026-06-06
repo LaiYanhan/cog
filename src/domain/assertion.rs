@@ -16,7 +16,6 @@ pub struct Assertion {
     pub retraction_reason: Option<String>,
 }
 
-#[allow(dead_code)]
 impl Assertion {
     pub fn short_id(&self) -> &str {
         if self.id.len() >= 8 {
@@ -28,10 +27,6 @@ impl Assertion {
 
     pub fn is_active(&self) -> bool {
         self.status == AssertionStatus::Active
-    }
-
-    pub fn is_retracted(&self) -> bool {
-        self.status == AssertionStatus::Retracted
     }
 }
 

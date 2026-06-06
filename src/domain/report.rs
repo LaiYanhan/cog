@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 use clap::ValueEnum;
@@ -91,11 +92,13 @@ pub enum CascadeReason {
     GroundWeakened,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ImpactCard {
     pub entity: Entity,
     pub downstream_entities: Vec<Entity>,
     pub affected_assertions: Vec<Assertion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk_assessment: Option<crate::space::risk::RiskAssessment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -112,13 +115,47 @@ pub struct TraceAssertion {
     pub dependencies: Vec<TraceAssertion>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[allow(dead_code)]
-pub struct RiskAssessment {
-    pub entity_name: String,
-    pub risk_score: f64,
-    pub downstream_count: usize,
-    pub active_assertions: usize,
-    pub fragile_assertions: usize,
-    pub summary: String,
+// ---------------------------------------------------------------------------
+// Command report types — used with emit_report for text/json output routing
+// ---------------------------------------------------------------------------
+
+/// Result of a `cog query` command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryCard {
+    pub entity: Entity,
+    pub assertions: Vec<(Assertion, Vec<Evidence>)>,
+    pub related: Vec<RelatedEntity>,
+}
+
+/// Result of a `cog index` command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityIndex {
+    pub entities: Vec<(Entity, usize)>,
+}
+
+/// Result of a `cog init` command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InitReport {
+    pub files_scanned: usize,
+    pub files_by_language: HashMap<String, usize>,
+    pub entities_created: usize,
+    pub relations_created: usize,
+    pub entity_counts_by_kind: HashMap<String, usize>,
+    pub dry_run: bool,
+}
+
+/// Result of a `cog verify` command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationReport {
+    pub checked_count: usize,
+    pub issues: Vec<VerificationIssue>,
+    pub cleaned_count: usize,
+    pub scan_issues: Vec<String>,
+    pub success: bool,
+}
+
+/// Lightweight status message for commands with simple output (assert, depend, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusMessage {
+    pub message: String,
 }

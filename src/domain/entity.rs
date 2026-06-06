@@ -4,10 +4,8 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-// ---------------------------------------------------------------------------
-// EntityOrigin
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // EntityOrigin
 // ---------------------------------------------------------------------------
@@ -101,7 +99,6 @@ pub fn parent_qname(qname: &str) -> Option<&str> {
     qname.rsplit_once("::").map(|(p, _)| p)
 }
 
-
 impl EntityKind {
     pub fn infer(qualified_name: &str) -> Self {
         let symbol = last_segment(qualified_name);
@@ -130,18 +127,20 @@ pub struct Entity {
     pub created_at: DateTime<Utc>,
 }
 
-#[allow(dead_code)]
 impl Entity {
-    pub fn short_name(&self) -> &str {
-        last_segment(&self.qualified_name)
-    }
-
-    pub fn module(&self) -> Option<&str> {
-        parent_qname(&self.qualified_name)
-    }
-
-    pub fn is_public(&self) -> bool {
-        // Symbols that don't start with '_' are considered public.
-        self.short_name().chars().next().is_some_and(|c| c != '_')
+    /// Create an entity from a tree-sitter scan. Origin is automatically Scan.
+    pub fn from_scan(
+        name: String,
+        kind: EntityKind,
+        metrics: crate::domain::metrics::EntityMetrics,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            qualified_name: name,
+            kind,
+            origin: EntityOrigin::Scan,
+            metrics,
+            created_at: Utc::now(),
+        }
     }
 }

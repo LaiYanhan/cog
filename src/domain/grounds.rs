@@ -4,13 +4,11 @@ use serde::{Deserialize, Serialize};
 /// Format: `source:detail` where source is a non-empty label and detail is the description.
 /// If no colon separator is found, the entire string becomes the detail with source="note".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct Grounds {
     pub source: String,
     pub detail: String,
 }
 
-#[allow(dead_code)]
 impl Grounds {
     pub fn parse(raw: &str) -> Self {
         match raw.split_once(':') {
@@ -25,8 +23,12 @@ impl Grounds {
         }
     }
 
-    pub fn as_str(&self) -> String {
-        format!("{}:{}", self.source, self.detail)
+    /// Validates the grounds format: must have `source:detail` with non-empty parts.
+    pub fn validate_format(&self) -> anyhow::Result<()> {
+        if self.source.is_empty() || self.detail.is_empty() {
+            anyhow::bail!("grounds must have non-empty source and detail");
+        }
+        Ok(())
     }
 }
 
