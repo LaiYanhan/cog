@@ -7,13 +7,10 @@ use crate::domain::*;
 /// Persistence contract for the cognitive model.
 ///
 /// Single production implementation: [`SqliteRepository`](super::SqliteRepository).
-/// Tests use `SqliteRepository::open_in_memory()`.
-#[allow(dead_code)]
 pub trait Repository {
     // ── Entity ──────────────────────────────────────────────────────────────
 
     fn upsert_entity(&self, name: &str, kind: EntityKind, origin: EntityOrigin) -> Result<Entity>;
-    fn insert_entity(&self, entity: &Entity) -> Result<bool>;
     fn get_entity(&self, id: &str) -> Result<Option<Entity>>;
     fn get_entity_by_name(&self, name: &str) -> Result<Option<Entity>>;
     fn list_entities(&self) -> Result<Vec<Entity>>;
@@ -35,7 +32,6 @@ pub trait Repository {
         grounds: &str,
         depends_on: Option<&str>,
     ) -> Result<Assertion>;
-    fn insert_assertion(&self, assertion: &Assertion) -> Result<bool>;
     fn get_assertion(&self, id: &str) -> Result<Option<Assertion>>;
     fn get_assertions_for_entity(&self, entity_id: &str) -> Result<Vec<Assertion>>;
     fn get_assertions_for_entities(&self, entity_ids: &[String]) -> Result<Vec<Assertion>>;
@@ -46,9 +42,6 @@ pub trait Repository {
 
     // ── Evidence ────────────────────────────────────────────────────────────
 
-    fn create_evidence(&self, assertion_id: &str, source: &str, detail: &str) -> Result<Evidence>;
-    fn insert_evidence(&self, evidence: &Evidence) -> Result<bool>;
-    fn get_evidence(&self, id: &str) -> Result<Option<Evidence>>;
     fn get_evidence_for_assertion(&self, assertion_id: &str) -> Result<Vec<Evidence>>;
     fn list_evidences(&self) -> Result<Vec<Evidence>>;
 
@@ -56,12 +49,10 @@ pub trait Repository {
 
     fn add_entity_relation(&self, from: &str, to: &str, kind: EntityRelationKind) -> Result<()>;
     fn list_entity_relations(&self) -> Result<Vec<EntityRelation>>;
-    fn add_assertion_dependency(&self, from_assertion: &str, to_assertion: &str) -> Result<()>;
     fn list_assertion_relations(&self) -> Result<Vec<AssertionRelation>>;
     fn get_dependents(&self, assertion_id: &str) -> Result<Vec<Assertion>>;
     fn get_dependencies(&self, assertion_id: &str) -> Result<Vec<Assertion>>;
     fn get_related_entities(&self, entity_id: &str) -> Result<Vec<RelatedEntity>>;
-    fn get_impact_neighbors(&self, entity_id: &str) -> Result<Vec<Entity>>;
 
     // ── Scanning ────────────────────────────────────────────────────────────
 
@@ -79,7 +70,11 @@ pub trait Repository {
 
     // ── Metrics ────────────────────────────────────────────────────────────
 
-    fn update_entity_metrics(&self, id: &str, metrics: &crate::domain::metrics::EntityMetrics) -> Result<()>;
+    fn update_entity_metrics(
+        &self,
+        id: &str,
+        metrics: &crate::domain::metrics::EntityMetrics,
+    ) -> Result<()>;
 
     // ── Utility ─────────────────────────────────────────────────────────────
 
