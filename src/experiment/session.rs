@@ -1,11 +1,12 @@
-use std::collections::{HashMap, HashSet};
-
-use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use anyhow::{Result, bail};
+use chrono::{DateTime, Utc};
+
 use crate::domain::*;
 use crate::repo::Repository;
+use crate::space::{SemanticSpace, StructureSpace};
 
 use super::ops::ExperimentOp;
 use super::report::{CommitReport, Contradiction, ExperimentReport};
@@ -31,104 +32,68 @@ pub struct Experiment {
     pub id: String,
     pub description: String,
     pub entity_focus: String,
+    /// UUID of the focus entity (resolved from entity_focus at start time).
+    #[serde(default)]
+    pub entity_focus_id: String,
+    pub created_at: DateTime<Utc>,
     pub status: ExperimentStatus,
     pub ops: Vec<ExperimentOp>,
-    /// In-memory snapshot of entities relevant to the experiment, keyed by id.
-    pub entities: HashMap<String, Entity>,
-    /// In-memory snapshot of assertions relevant to the experiment, keyed by id.
-    pub assertions: HashMap<String, Assertion>,
-    /// In-memory assertion relations (for dependency tracing).
+    /// Structural sub-space snapshot (entities + relations).
     #[serde(default)]
-    pub assertion_relations: Vec<AssertionRelation>,
+    pub structure: StructureSpace,
+    /// Semantic sub-space snapshot (assertions + evidence).
+    #[serde(default)]
+    pub semantic: SemanticSpace,
     /// Entities on the boundary of the loaded subgraph (partial data).
     pub boundary_entities: Vec<String>,
     // ── Evaluation results (filled after evaluate()) ──
     pub risk_score: Option<f64>,
     pub affected: Vec<AffectedAssertion>,
     pub contradictions: Vec<Contradiction>,
+    /// Whether the experiment has been explicitly saved.
+    /// Unsaved experiments are in-progress drafts; `save` marks them as persisted.
+    #[serde(default)]
+    pub saved: bool,
 }
 
 impl Experiment {
     // ── Construction ──────────────────────────────────────────────────────
 
     /// Start a new experiment by loading a subgraph around `entity_name`.
-    ///
-    /// BFS from the focus entity, expanding via entity relations, up to
-    /// `max_nodes` entities (default 500).
     pub fn start(
         repo: &dyn Repository,
         entity_name: &str,
         description: String,
         max_nodes: usize,
     ) -> Result<Self> {
+        // Load structural sub-space via adaptive BFS (no depth limit, cap by max_nodes).
+        let structure = StructureSpace::load(repo, entity_name, 0, max_nodes)?;
+
+        // Get the focus entity id for semantic loading
         let focus = repo
             .get_entity_by_name(entity_name)?
             .ok_or_else(|| anyhow::anyhow!("entity not found: {entity_name}"))?;
 
-        // BFS to collect entity IDs
-        let mut visited: HashSet<String> = HashSet::new();
-        let mut frontier: Vec<String> = vec![focus.id.clone()];
-        let mut boundary = Vec::new();
-
-        while !frontier.is_empty() && visited.len() < max_nodes {
-            let next_id = frontier.remove(0);
-            if visited.contains(&next_id) {
-                continue;
-            }
-            visited.insert(next_id.clone());
-
-            let related = repo.get_related_entities(&next_id)?;
-            for rel in related {
-                let neighbor_id = rel.entity.id.clone();
-                if !visited.contains(&neighbor_id) {
-                    if visited.len() + frontier.len() < max_nodes {
-                        if !frontier.contains(&neighbor_id) {
-                            frontier.push(neighbor_id);
-                        }
-                    } else {
-                        boundary.push(rel.entity.qualified_name.clone());
-                    }
-                }
-            }
-        }
-
-        // Load full entities and assertions for visited set
-        let mut entities = HashMap::new();
-        let mut assertions = HashMap::new();
-        entities.insert(focus.id.clone(), focus);
-
-        for eid in &visited {
-            if let Some(entity) = repo.get_entity(eid)? {
-                entities.insert(entity.id.clone(), entity);
-            }
-        }
-
-        // Batch-load assertions for all visited entities
-        let entity_ids: Vec<String> = visited.iter().cloned().collect();
-        let all_assertions = repo.get_assertions_for_entities(&entity_ids)?;
-        for a in all_assertions {
-            assertions.insert(a.id.clone(), a);
-        }
-
-        // Load assertion relations for tracing dependents during evaluate
-        let assertion_relations = repo.list_assertion_relations()?;
-
+        // Load semantic sub-space for the focus entity
+        let semantic = SemanticSpace::load(repo, &focus.id)?;
+        let boundary = structure.boundary.clone();
         Ok(Experiment {
             id: Uuid::new_v4().to_string(),
             description,
             entity_focus: entity_name.to_string(),
+            entity_focus_id: focus.id.clone(),
+            created_at: Utc::now(),
             status: ExperimentStatus::Open,
             ops: Vec::new(),
-            entities,
-            assertions,
-            assertion_relations,
+            structure,
+            semantic,
             boundary_entities: boundary,
             risk_score: None,
             affected: Vec::new(),
             contradictions: Vec::new(),
+            saved: false,
         })
     }
-
     // ── Open state ────────────────────────────────────────────────────────
 
     /// Add a hypothetical operation. Does NOT touch the real repository.
@@ -137,7 +102,8 @@ impl Experiment {
     }
 
     /// Evaluate all hypothetical ops: simulate cascades and detect contradictions.
-    pub fn evaluate(&mut self) -> Result<()> {
+    /// Pure computation — does not mutate the experiment.
+    pub fn evaluate(&self) -> Result<ExperimentReport> {
         if self.status != ExperimentStatus::Open {
             bail!("experiment must be in Open state to evaluate");
         }
@@ -147,85 +113,93 @@ impl Experiment {
 
         for op in &self.ops {
             match op {
-                ExperimentOp::HypotheticalRetraction {
+                ExperimentOp::Retraction {
                     assertion_id,
                     reason: _reason,
                 } => {
-                    // Trace dependents in-memory via assertion_relations
-                    let cascade =
-                        Self::trace_dependents(assertion_id, &self.assertions, &self.assertion_relations);
-                    affected.extend(cascade);
+                    if let Some(cascade) = self.semantic.simulate_retract(assertion_id) {
+                        affected.extend(cascade.affected);
+                    }
                 }
-                ExperimentOp::HypotheticalAssertion {
+                ExperimentOp::Assertion {
                     entity_name,
                     kind,
                     claim,
                     ..
                 } => {
-                    // Find entity by name in snapshot
-                    let entity_id = self
-                        .entities
-                        .values()
-                        .find(|e| e.qualified_name == *entity_name)
-                        .map(|e| e.id.as_str());
+                    for node in self.semantic.assertions.values() {
+                        let a = &node.assertion;
+                        let entity_match = self.structure.entities.values().any(|en| {
+                            en.entity.qualified_name == *entity_name && en.entity.id == a.entity_id
+                        });
 
-                    if let Some(eid) = entity_id {
-                        // Check for contradictions with existing active assertions
-                        for a in self.assertions.values() {
-                            if a.entity_id == eid
-                                && a.kind == *kind
-                                && a.is_active()
-                                && a.claim != *claim
-                            {
-                                contradictions.push(Contradiction {
-                                    new_claim: claim.clone(),
-                                    existing_claim: a.claim.clone(),
-                                    reason: format!(
-                                        "same entity and kind, different claim (existing: {})",
-                                        a.short_id()
-                                    ),
-                                });
-                            }
+                        if entity_match && a.kind == *kind && a.is_active() && a.claim != *claim {
+                            contradictions.push(Contradiction {
+                                new_claim: claim.clone(),
+                                existing_claim: a.claim.clone(),
+                                reason: format!(
+                                    "same entity and kind, different claim (existing: {})",
+                                    a.short_id()
+                                ),
+                            });
                         }
                     }
                 }
-                ExperimentOp::HypotheticalRelation { .. } => {
-                    // No cascade/contradiction implications for relations
+                ExperimentOp::Delete { entity_name } => {
+                    for node in self.semantic.assertions.values() {
+                        let en = self
+                            .structure
+                            .entities
+                            .values()
+                            .find(|en| en.entity.qualified_name == *entity_name);
+                        if let Some(en) = en
+                            && node.assertion.entity_id == en.entity.id
+                        {
+                            contradictions.push(Contradiction {
+                                new_claim: format!("delete entity {entity_name}"),
+                                existing_claim: node.assertion.claim.clone(),
+                                reason: "assertion would be orphaned by entity deletion"
+                                    .to_string(),
+                            });
+                        }
+                    }
                 }
+                ExperimentOp::Relation { .. } => {}
             }
         }
 
-        let total = self.assertions.len().max(1);
-        let affected_count = affected.len();
-        let risk_score = affected_count as f64 / total as f64;
+        let risk = self
+            .semantic
+            .assess_risk(&self.entity_focus_id, &self.structure);
 
-        self.risk_score = Some(risk_score);
-        self.affected = affected;
-        self.contradictions = contradictions;
-        self.status = ExperimentStatus::Evaluated;
-
-        Ok(())
-    }
-
-    // ── Evaluated state ───────────────────────────────────────────────────
-
-    /// Generate a report from the evaluation results.
-    pub fn report(&self) -> ExperimentReport {
-        let risk = self.risk_score.unwrap_or(0.0);
-        ExperimentReport {
+        Ok(ExperimentReport {
             experiment_id: self.id.clone(),
             description: self.description.clone(),
             entity_focus: self.entity_focus.clone(),
             ops_count: self.ops.len(),
-            risk_score: risk,
-            affected_count: self.affected.len(),
-            contradictions: self.contradictions.clone(),
+            risk_score: risk.risk_score,
+            affected_count: affected.len(),
+            contradictions,
             boundary_entities: self.boundary_entities.clone(),
+        })
+    }
+
+    /// Mark the experiment as evaluated (call after `evaluate()`).
+    pub fn mark_evaluated(&mut self) -> Result<()> {
+        if self.status != ExperimentStatus::Open {
+            bail!("experiment must be in Open state to mark as evaluated");
         }
+        self.status = ExperimentStatus::Evaluated;
+        Ok(())
+    }
+
+    /// Mark the experiment as explicitly saved (checkpoint).
+    pub fn mark_saved(&mut self) {
+        self.saved = true;
     }
 
     /// Replay all ops to the real repository. Returns a commit report.
-    pub fn commit(&mut self, repo: &dyn Repository) -> Result<CommitReport> {
+    pub fn commit(mut self, repo: &dyn Repository) -> Result<CommitReport> {
         if self.status != ExperimentStatus::Evaluated {
             bail!("experiment must be in Evaluated state to commit");
         }
@@ -236,7 +210,7 @@ impl Experiment {
 
         for op in &self.ops {
             match op {
-                ExperimentOp::HypotheticalAssertion {
+                ExperimentOp::Assertion {
                     entity_name,
                     kind,
                     claim,
@@ -247,23 +221,19 @@ impl Experiment {
                     match repo.get_entity_by_name(entity_name)? {
                         Some(entity) => {
                             let dep = depends_on.as_deref();
-                            repo.create_assertion(
-                                &entity.id,
-                                *kind,
-                                claim,
-                                grounds,
-                                dep,
-                            )?;
+                            repo.create_assertion(&entity.id, *kind, claim, grounds, dep)?;
                             applied += 1;
                             details.push(format!("asserted on {entity_name}: {claim}"));
                         }
                         None => {
                             skipped += 1;
-                            details.push(format!("skipped assertion: entity not found: {entity_name}"));
+                            details.push(format!(
+                                "skipped assertion: entity not found: {entity_name}"
+                            ));
                         }
                     }
                 }
-                ExperimentOp::HypotheticalRetraction {
+                ExperimentOp::Retraction {
                     assertion_id,
                     reason,
                 } => {
@@ -276,12 +246,23 @@ impl Experiment {
                         }
                         Err(_) => {
                             skipped += 1;
-                            details
-                                .push(format!("skipped retraction: assertion not found: {assertion_id}"));
+                            details.push(format!(
+                                "skipped retraction: assertion not found: {assertion_id}"
+                            ));
                         }
                     }
                 }
-                ExperimentOp::HypotheticalRelation {
+                ExperimentOp::Delete { entity_name } => match repo.delete_entity(entity_name)? {
+                    true => {
+                        applied += 1;
+                        details.push(format!("deleted entity: {entity_name}"));
+                    }
+                    false => {
+                        skipped += 1;
+                        details.push(format!("skipped delete: entity not found: {entity_name}"));
+                    }
+                },
+                ExperimentOp::Relation {
                     from_entity,
                     to_entity,
                     kind,
@@ -319,41 +300,5 @@ impl Experiment {
     /// Discard the experiment. Consumes self without side effects.
     pub fn discard(mut self) {
         self.status = ExperimentStatus::Discarded;
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────
-
-    /// Trace dependents of a retracted assertion using in-memory data.
-    fn trace_dependents(
-        assertion_id: &str,
-        assertions: &HashMap<String, Assertion>,
-        relations: &[AssertionRelation],
-    ) -> Vec<AffectedAssertion> {
-        let mut result = Vec::new();
-        let mut visited = HashSet::new();
-        let mut queue = vec![assertion_id.to_string()];
-
-        while let Some(current_id) = queue.pop() {
-            if !visited.insert(current_id.clone()) {
-                continue;
-            }
-            // Find assertions that depend on the current one
-            for rel in relations {
-                if rel.to_assertion == current_id && !visited.contains(&rel.from_assertion) {
-                    queue.push(rel.from_assertion.clone());
-                }
-            }
-            // Record as affected (skip the root retraction itself)
-            if current_id != assertion_id {
-                if let Some(a) = assertions.get(&current_id) {
-                    result.push(AffectedAssertion {
-                        assertion: a.clone(),
-                        cascade_reason: CascadeReason::GroundWeakened,
-                    });
-                }
-            }
-        }
-
-        result
     }
 }

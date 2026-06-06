@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::fmt::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
 
 use crate::analysis::{Language, ScanConfig, Scanner};
 use crate::command::CommandOutput;
-use crate::domain::{EntityKind, EntityOrigin, EntityRelationKind, parent_qname};
+use crate::domain::{EntityKind, EntityOrigin, EntityRelationKind, InitReport, parent_qname};
+use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
 
 /// Strips common source-directory prefixes from a relative path, then converts
@@ -46,6 +46,7 @@ pub fn execute(
     dry_run: bool,
     max_depth: Option<usize>,
     languages: Option<Vec<String>>,
+    output: OutputFormat,
 ) -> Result<CommandOutput> {
     let lang_filters: Option<Vec<Language>> = languages.as_ref().map(|langs| {
         langs
@@ -60,7 +61,7 @@ pub fn execute(
         languages: lang_filters,
     };
 
-    let result = Scanner::scan(&config)?;
+    let result = Scanner::new().scan(&config)?;
 
     if result.files_scanned == 0 {
         return Ok(CommandOutput::with_exit_code(
@@ -71,14 +72,19 @@ pub fn execute(
 
     // ── Dry-run path: just summarise ──────────────────────────────────
     if dry_run {
-        let mut out = String::from("DRY RUN — no changes written\n\n");
-        format_summary(
-            &mut out,
-            &result.definitions,
-            &result.files_by_language,
-            result.files_scanned,
-        )?;
-        return Ok(CommandOutput::success(out));
+        let mut entity_counts: HashMap<String, usize> = HashMap::new();
+        for def in &result.definitions {
+            *entity_counts.entry(def.kind.to_string()).or_default() += 1;
+        }
+        let report = InitReport {
+            files_scanned: result.files_scanned,
+            files_by_language: result.files_by_language.clone(),
+            entities_created: 0,
+            relations_created: 0,
+            entity_counts_by_kind: entity_counts,
+            dry_run: true,
+        };
+        return Ok(CommandOutput::success(format::emit_report(&report, output)));
     }
 
     // ── Build entity hierarchy ────────────────────────────────────────
@@ -261,38 +267,23 @@ pub fn execute(
         }
 
         for entity in &all_entities {
-            if let Some(&(fan_in, fan_out)) = fan_counts.get(entity.id.as_str()) {
-                if fan_in > 0 || fan_out > 0 {
-                    let mut metrics = entity.metrics.clone();
-                    metrics.fan_in = Some(fan_in);
-                    metrics.fan_out = Some(fan_out);
-                    let _ = repo.update_entity_metrics(&entity.id, &metrics);
-                }
+            if let Some(&(fan_in, fan_out)) = fan_counts.get(entity.id.as_str())
+                && (fan_in > 0 || fan_out > 0)
+            {
+                let mut metrics = entity.metrics.clone();
+                metrics.fan_in = Some(fan_in);
+                metrics.fan_out = Some(fan_out);
+                let _ = repo.update_entity_metrics(&entity.id, &metrics);
             }
         }
     }
 
-    // Total entities = dirs + files + definitions
-    let total_entities = dir_entities.len() + file_entities.len() + def_count;
-    let lang_summary = format_language_summary(&result.files_by_language);
-
-    let mut out = String::new();
-    writeln!(
-        out,
-        "Scanned {} files ({})",
-        result.files_scanned, lang_summary
-    )?;
-    writeln!(
-        out,
-        "Created {} entities, {} contains, {} uses relations",
-        total_entities, contains_count, uses_count
-    )?;
-    writeln!(out)?;
-
+    // Build entity kind counts for the report
+    let mut entity_counts: HashMap<String, usize> = HashMap::new();
     let module_count =
         get_kind(&kind_counts, EntityKind::Module) + dir_entities.len() + file_entities.len();
     if module_count > 0 {
-        writeln!(out, "  Module:    {}", module_count)?;
+        entity_counts.insert("module".to_string(), module_count);
     }
     for kind in &[
         EntityKind::Type,
@@ -302,56 +293,18 @@ pub fn execute(
     ] {
         let count = get_kind(&kind_counts, *kind);
         if count > 0 {
-            let label = kind.to_string();
-            let pad = 10 - label.len();
-            let pad_str: String = " ".repeat(pad);
-            writeln!(out, "  {}:{}{}", label, pad_str, count)?;
+            entity_counts.insert(kind.to_string(), count);
         }
     }
 
-    writeln!(out)?;
-    writeln!(out, "Next: cog index | cog trace <entity>")?;
-
-    Ok(CommandOutput::success(out))
-}
-
-fn format_summary(
-    out: &mut String,
-    definitions: &[crate::analysis::Definition],
-    files_by_language: &HashMap<String, usize>,
-    files_scanned: usize,
-) -> Result<()> {
-    let lang_summary = format_language_summary(files_by_language);
-    writeln!(out, "Scanned {} files ({})", files_scanned, lang_summary)?;
-
-    let mut kind_counts: HashMap<String, usize> = HashMap::new();
-    for def in definitions {
-        inc_kind(&mut kind_counts, def.kind);
-    }
-
-    writeln!(out, "Would create {} definitions", definitions.len())?;
-    writeln!(out)?;
-    for kind in &[EntityKind::Module, EntityKind::Type, EntityKind::Function] {
-        let count = get_kind(&kind_counts, *kind);
-        if count > 0 {
-            let label = kind.to_string();
-            let pad = 10 - label.len();
-            let pad_str: String = " ".repeat(pad);
-            writeln!(out, "  {}:{}{}", label, pad_str, count)?;
-        }
-    }
-    Ok(())
-}
-
-fn format_language_summary(files_by_language: &HashMap<String, usize>) -> String {
-    if files_by_language.is_empty() {
-        return "no languages".to_string();
-    }
-    let mut entries: Vec<_> = files_by_language.iter().collect();
-    entries.sort_by(|a, b| b.1.cmp(a.1));
-    entries
-        .iter()
-        .map(|(lang, count)| format!("{}: {}", lang, count))
-        .collect::<Vec<_>>()
-        .join(", ")
+    let total_entities = dir_entities.len() + file_entities.len() + def_count;
+    let report = InitReport {
+        files_scanned: result.files_scanned,
+        files_by_language: result.files_by_language.clone(),
+        entities_created: total_entities,
+        relations_created: contains_count + uses_count,
+        entity_counts_by_kind: entity_counts,
+        dry_run: false,
+    };
+    Ok(CommandOutput::success(format::emit_report(&report, output)))
 }

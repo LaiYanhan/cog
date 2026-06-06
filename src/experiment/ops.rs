@@ -4,20 +4,23 @@ use crate::domain::{AssertionKind, EntityRelationKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ExperimentOp {
-    HypotheticalAssertion {
+    Assertion {
         entity_name: String,
         kind: AssertionKind,
         claim: String,
         grounds: String,
         depends_on: Option<String>,
     },
-    HypotheticalRetraction {
+    Retraction {
         assertion_id: String,
         reason: String,
     },
-    HypotheticalRelation {
+    Relation {
         from_entity: String,
         to_entity: String,
         kind: EntityRelationKind,
+    },
+    Delete {
+        entity_name: String,
     },
 }

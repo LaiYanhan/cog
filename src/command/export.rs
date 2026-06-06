@@ -67,8 +67,9 @@ fn snapshot_to_dot(snapshot: &ModelSnapshot) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::repo::Repository;
+
     use anyhow::Result;
-    use tempfile::tempdir;
 
     use super::execute;
     use crate::domain::{AssertionKind, EntityKind, EntityOrigin, ExportFormat};
@@ -76,8 +77,7 @@ mod tests {
 
     #[test]
     fn exports_json_snapshot() -> Result<()> {
-        let tmp = tempdir()?;
-        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open_in_memory()?;
         let entity =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         store.create_assertion(
@@ -97,8 +97,7 @@ mod tests {
 
     #[test]
     fn exports_dot_snapshot() -> Result<()> {
-        let tmp = tempdir()?;
-        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open_in_memory()?;
         let entity =
             store.upsert_entity("auth::login", EntityKind::Function, EntityOrigin::Manual)?;
         store.create_assertion(

@@ -16,16 +16,15 @@ pub struct SuggestedAction {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum ActionKind {
     InitProject,
-    RecordMissingContracts { entity_count: usize },
-    ReviewUncertainAssertions { count: usize },
+    RecordMissingContracts,
+    ReviewUncertainAssertions,
     StartRecording,
-    AssessImpact { entity: String },
+    AssessImpact,
     StartChange,
     VerifyChanges,
-    RecordFix { entity: String },
+    RecordFix,
     FinishChange,
     AbortChange,
     TraceRootCause,
@@ -33,8 +32,6 @@ pub enum ActionKind {
     StartExperiment,
     StartExperimentDuringChange,
 }
-
-// ── Suggestion engine ──
 
 /// Returns suggested actions based on current workflow state and model data.
 pub fn suggest_actions(state: &WorkflowState, repo: &dyn Repository) -> Vec<SuggestedAction> {
@@ -72,9 +69,7 @@ fn suggest_for_ready(phase: &WorkflowPhase, repo: &dyn Repository) -> Vec<Sugges
             let orphans = count_orphan_entities(repo, &stats);
             if orphans > 0 {
                 actions.push(SuggestedAction {
-                    action: ActionKind::RecordMissingContracts {
-                        entity_count: orphans,
-                    },
+                    action: ActionKind::RecordMissingContracts,
                     description: format!("{orphans} entities have no assertions yet."),
                     why: "Core modules need contracts before any change.".into(),
                     example_command: "cog assert <entity> --kind contract --claim \"...\"".into(),
@@ -85,18 +80,14 @@ fn suggest_for_ready(phase: &WorkflowPhase, repo: &dyn Repository) -> Vec<Sugges
             let orphans = count_orphan_entities(repo, &stats);
             if orphans > 0 {
                 actions.push(SuggestedAction {
-                    action: ActionKind::RecordMissingContracts {
-                        entity_count: orphans,
-                    },
+                    action: ActionKind::RecordMissingContracts,
                     description: format!("{orphans} entities have no assertions yet."),
                     why: "Core modules need contracts before any change.".into(),
                     example_command: "cog assert <entity> --kind contract --claim \"...\"".into(),
                 });
             }
             actions.push(SuggestedAction {
-                action: ActionKind::AssessImpact {
-                    entity: "try a core entity".into(),
-                },
+                action: ActionKind::AssessImpact,
                 description: "Run impact analysis to understand downstream dependencies.".into(),
                 why: "Knowing blast radius before changes reduces surprise.".into(),
                 example_command: "cog impact <core_entity>".into(),
@@ -118,9 +109,7 @@ fn suggest_for_ready(phase: &WorkflowPhase, repo: &dyn Repository) -> Vec<Sugges
         }
         WorkflowPhase::PostChange => {
             actions.push(SuggestedAction {
-                action: ActionKind::RecordFix {
-                    entity: "changed entity".into(),
-                },
+                action: ActionKind::RecordFix,
                 description: "Record corrections for changed entities.".into(),
                 why: "Keep the model in sync with the code after changes.".into(),
                 example_command: "cog assert <entity> --kind correction --claim \"...\"".into(),
@@ -135,9 +124,7 @@ fn suggest_for_ready(phase: &WorkflowPhase, repo: &dyn Repository) -> Vec<Sugges
         WorkflowPhase::Debugging => {
             if stats.uncertain_assertions > 0 {
                 actions.push(SuggestedAction {
-                    action: ActionKind::ReviewUncertainAssertions {
-                        count: stats.uncertain_assertions as usize,
-                    },
+                    action: ActionKind::ReviewUncertainAssertions,
                     description: format!(
                         "{} assertions are uncertain since last retraction.",
                         stats.uncertain_assertions
@@ -187,9 +174,7 @@ fn suggest_for_changing(
 
     if let Some(first) = affected.first() {
         actions.push(SuggestedAction {
-            action: ActionKind::RecordFix {
-                entity: first.clone(),
-            },
+            action: ActionKind::RecordFix,
             description: format!("Record fix for {first}"),
             why: "Document corrections to keep the model accurate.".into(),
             example_command: format!("cog assert {first} --kind correction --claim \"...\""),

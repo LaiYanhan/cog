@@ -1,8 +1,9 @@
 use anyhow::{Result, anyhow};
 
 use crate::command::CommandOutput;
-use crate::domain::{AssertionKind, ChangelogAction, EntityKind, EntityOrigin};
-use crate::format;
+use crate::domain::grounds::Grounds;
+use crate::domain::{AssertionKind, ChangelogAction, EntityKind, EntityOrigin, StatusMessage};
+use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
 
 pub fn execute(
@@ -12,6 +13,7 @@ pub fn execute(
     claim: &str,
     grounds: &str,
     depends_on: Option<&str>,
+    output: OutputFormat,
 ) -> Result<CommandOutput> {
     let resolved_depends_on = depends_on
         .map(|id| repo.resolve_assertion_id(id))
@@ -26,6 +28,9 @@ pub fn execute(
         }
     }
 
+    // Validate grounds format before storing
+    Grounds::parse(grounds).validate_format()?;
+
     let entity_record =
         repo.upsert_entity(entity, EntityKind::infer(entity), EntityOrigin::Manual)?;
     let assertion = repo.create_assertion(
@@ -39,29 +44,29 @@ pub fn execute(
     repo.append_changelog(
         ChangelogAction::Assert,
         &assertion.id,
-        &format!("entity={} kind={} claim={}", entity, kind, claim),
+        &format!("entity={entity} kind={kind} claim={claim}"),
     )?;
 
-    Ok(CommandOutput::success(format::assertion_created(
-        &assertion,
-        &entity_record,
-        resolved_depends_on.as_deref(),
+    let msg = format::assertion_created(&assertion, &entity_record, resolved_depends_on.as_deref());
+    Ok(CommandOutput::success(format::emit_report(
+        &StatusMessage { message: msg },
+        output,
     )))
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::repo::Repository;
     use anyhow::Result;
-    use tempfile::tempdir;
 
     use super::execute;
     use crate::domain::AssertionKind;
+    use crate::format::OutputFormat;
     use crate::repo::SqliteRepository;
 
     #[test]
     fn creates_assertion_and_evidence() -> Result<()> {
-        let tmp = tempdir()?;
-        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open_in_memory()?;
 
         let output = execute(
             &store,
@@ -70,6 +75,7 @@ mod tests {
             "returns token on success",
             "code:auth::login",
             None,
+            OutputFormat::Text,
         )?;
 
         assert_eq!(output.exit_code, 0);

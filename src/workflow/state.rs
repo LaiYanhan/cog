@@ -179,12 +179,6 @@ impl WorkflowState {
         // no-op: browsing doesn't change state
     }
 
-    /// Whether this state represents a change in progress.
-    #[allow(dead_code)]
-    pub fn is_changing(&self) -> bool {
-        matches!(self, WorkflowState::Changing { .. })
-    }
-
     /// Human-readable description of current state.
     pub fn describe(&self) -> String {
         match self {

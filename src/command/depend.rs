@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::command::CommandOutput;
-use crate::domain::{ChangelogAction, EntityKind, EntityOrigin, EntityRelationKind};
-use crate::format;
+use crate::domain::{ChangelogAction, EntityKind, EntityOrigin, EntityRelationKind, StatusMessage};
+use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
 
 pub fn execute(
@@ -10,6 +10,7 @@ pub fn execute(
     entity_a: &str,
     entity_b: &str,
     kind: EntityRelationKind,
+    output: OutputFormat,
 ) -> Result<CommandOutput> {
     let left = repo.upsert_entity(entity_a, EntityKind::infer(entity_a), EntityOrigin::Manual)?;
     let right = repo.upsert_entity(entity_b, EntityKind::infer(entity_b), EntityOrigin::Manual)?;
@@ -24,26 +25,34 @@ pub fn execute(
         ),
     )?;
 
-    Ok(CommandOutput::success(format::dependency_recorded(
-        &left, &right, kind,
+    let msg = format::dependency_recorded(&left, &right, kind);
+    Ok(CommandOutput::success(format::emit_report(
+        &StatusMessage { message: msg },
+        output,
     )))
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::repo::Repository;
     use anyhow::Result;
-    use tempfile::tempdir;
 
     use super::execute;
     use crate::domain::EntityRelationKind;
+    use crate::format::OutputFormat;
     use crate::repo::SqliteRepository;
 
     #[test]
     fn records_entity_dependency() -> Result<()> {
-        let tmp = tempdir()?;
-        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
+        let store = SqliteRepository::open_in_memory()?;
 
-        let output = execute(&store, "auth::login", "AuthToken", EntityRelationKind::Uses)?;
+        let output = execute(
+            &store,
+            "auth::login",
+            "AuthToken",
+            EntityRelationKind::Uses,
+            OutputFormat::Text,
+        )?;
 
         assert_eq!(output.exit_code, 0);
         assert!(output.text.contains("dependency recorded"));

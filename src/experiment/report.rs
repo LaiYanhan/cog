@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExperimentReport {
     pub experiment_id: String,

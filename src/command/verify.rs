@@ -1,12 +1,14 @@
 use std::collections::HashSet;
-use std::fmt::Write;
 use std::path::Path;
 
 use anyhow::Result;
 
 use crate::analysis::{ScanConfig, Scanner};
 use crate::command::CommandOutput;
-use crate::domain::{AssertionStatus, ChangelogAction, VerificationIssue, VerificationIssueKind};
+use crate::domain::{
+    AssertionStatus, ChangelogAction, VerificationIssue, VerificationIssueKind, VerificationReport,
+};
+use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
 
 pub fn execute(
@@ -14,6 +16,7 @@ pub fn execute(
     scope: Option<&str>,
     clean: bool,
     scan_path: Option<&Path>,
+    output: OutputFormat,
 ) -> Result<CommandOutput> {
     let mut issues = Vec::new();
     let mut cleaned: usize = 0;
@@ -119,7 +122,7 @@ pub fn execute(
             root: path.to_path_buf(),
             ..Default::default()
         };
-        let scan_result = Scanner::scan(&config)?;
+        let scan_result = Scanner::new().scan(&config)?;
 
         // Build the full set of scanned entity names: definitions + file/directory modules.
         // This mirrors what init_cmd creates, so stale detection works for both
@@ -187,13 +190,6 @@ pub fn execute(
         &format!("issues={}", issues.len()),
     )?;
 
-    let clean_note = if cleaned > 0 || (clean && !stale_names.is_empty()) {
-        let total_cleaned = cleaned + if clean { stale_names.len() } else { 0 };
-        format!(", cleaned={}", total_cleaned)
-    } else {
-        String::new()
-    };
-
     let stale_count = stale_names.len();
     let has_scan_diff = unmodeled_count > 0 || stale_count > 0;
     let scan_cleaned = clean && stale_count > 0;
@@ -206,85 +202,52 @@ pub fn execute(
 
     // Success condition for scan results:
     // - No scan diff at all → ok
-    // - Only unmodeled (advisory: "you could model these") but no stale → still ok
-    // - Any stale entity → failure (model is out of sync with code)
-    if success && (!has_scan_diff || (unmodeled_count > 0 && stale_count == 0)) {
-        let mut msg = format!(
-            "verify: ok (checked {} entities: isolated, missing evidence, dangling dependencies, dangling grounds{})",
-            checked_count, clean_note,
-        );
-        if unmodeled_count > 0 {
-            let _ = write!(
-                msg,
-                "\nScan diff: {} unmodeled definition(s) not in model (run cog init to add)",
-                unmodeled_count
-            );
-        }
-        return Ok(CommandOutput::success(msg));
-    }
-    if success && scan_cleaned {
-        return Ok(CommandOutput::success(format!(
-            "verify: ok (checked {} entities{})\nScan diff: cleaned {} stale {}",
-            checked_count,
-            clean_note,
-            stale_count,
-            entities_word(stale_count),
-        )));
-    }
+    // - Only unmodeled (advisory) but no stale → still ok
+    // - Any stale entity → failure
+    let overall_ok = success && (!has_scan_diff || (unmodeled_count > 0 && stale_count == 0))
+        || (success && scan_cleaned);
 
-    let mut report = String::new();
-    if !issues.is_empty() {
-        let _ = writeln!(
-            report,
-            "verify: found {} issue(s){}",
-            issues.len(),
-            clean_note
-        );
-        for issue in &issues {
-            let _ = writeln!(
-                report,
-                "- {:?} entity={} assertion={} detail={}",
-                issue.kind,
-                issue.entity_name.as_deref().unwrap_or("-"),
-                issue
-                    .assertion_id
-                    .as_deref()
-                    .map(crate::format::short_id)
-                    .unwrap_or("-"),
-                issue.detail,
-            );
-        }
-    }
-
+    // Build scan diff messages
+    let mut scan_issues = Vec::new();
     if has_scan_diff {
         if unmodeled_count > 0 {
-            let _ = writeln!(
-                report,
+            scan_issues.push(format!(
                 "Scan diff: {} unmodeled definition(s) not in model (run cog init to add)",
                 unmodeled_count,
-            );
+            ));
         }
         if stale_count > 0 && !clean {
-            let _ = writeln!(
-                report,
+            scan_issues.push(format!(
                 "Scan diff: {} stale auto-scanned {} no longer in code (run cog verify --scan --clean to remove)",
                 stale_count,
                 entities_word(stale_count),
-            );
+            ));
             for name in &stale_names {
-                let _ = writeln!(report, "  - {}", name);
+                scan_issues.push(format!("  - {name}"));
             }
         } else if stale_count > 0 && clean {
-            let _ = writeln!(
-                report,
+            scan_issues.push(format!(
                 "Scan diff: cleaned {} stale auto-scanned {}",
                 stale_count,
                 entities_word(stale_count),
-            );
+            ));
         }
     }
 
-    Ok(CommandOutput::with_exit_code(report, 1))
+    let total_cleaned = cleaned + if clean { stale_count } else { 0 };
+    let report = VerificationReport {
+        checked_count,
+        issues,
+        cleaned_count: total_cleaned,
+        scan_issues,
+        success: overall_ok,
+    };
+
+    let exit_code: i32 = if overall_ok { 0 } else { 1 };
+    Ok(CommandOutput::with_exit_code(
+        format::emit_report(&report, output),
+        exit_code,
+    ))
 }
 
 /// Returns "entity" for count 1, "entities" otherwise.
@@ -294,6 +257,7 @@ fn entities_word(count: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use crate::repo::Repository;
     use std::fs;
 
     use anyhow::Result;
@@ -310,7 +274,7 @@ mod tests {
         let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
         store.upsert_entity("orphan", EntityKind::Module, EntityOrigin::Manual)?;
 
-        let output = execute(&store, None, false, None)?;
+        let output = execute(&store, None, false, None, crate::format::OutputFormat::Text)?;
         assert_eq!(output.exit_code, 1);
         assert!(output.text.contains("IsolatedEntity"));
         Ok(())
@@ -330,7 +294,13 @@ mod tests {
             None,
         )?;
 
-        let output = execute(&store, Some("auth"), false, None)?;
+        let output = execute(
+            &store,
+            Some("auth"),
+            false,
+            None,
+            crate::format::OutputFormat::Text,
+        )?;
         assert_eq!(output.exit_code, 0);
         assert!(output.text.contains("verify: ok"));
         Ok(())
@@ -354,17 +324,36 @@ mod tests {
 
         // Create a Rust project with one function and init (populates store with origin=Scan)
         make_rust_project(tmp.path(), &["hello"]);
-        init_cmd::execute(&store, &tmp.path().to_path_buf(), false, None, None)?;
+        init_cmd::execute(
+            &store,
+            &tmp.path().to_path_buf(),
+            false,
+            None,
+            None,
+            crate::format::OutputFormat::Text,
+        )?;
 
         // Verify: entity is in the model AND in the scan → ok
-        let output = execute(&store, None, false, Some(tmp.path()))?;
+        let output = execute(
+            &store,
+            None,
+            false,
+            Some(tmp.path()),
+            crate::format::OutputFormat::Text,
+        )?;
         assert_eq!(output.exit_code, 0, "first verify should pass");
 
         // Remove the function from source
         fs::write(tmp.path().join("src/main.rs"), "")?;
 
         // Now verify should detect the stale scanned entity
-        let output = execute(&store, None, false, Some(tmp.path()))?;
+        let output = execute(
+            &store,
+            None,
+            false,
+            Some(tmp.path()),
+            crate::format::OutputFormat::Text,
+        )?;
         assert_eq!(output.exit_code, 1);
         assert!(output.text.contains("stale"));
 
@@ -378,7 +367,13 @@ mod tests {
 
         // Scan against an empty model — all definitions should be unmodeled
         make_rust_project(tmp.path(), &["alpha", "beta"]);
-        let output = execute(&store, None, false, Some(tmp.path()))?;
+        let output = execute(
+            &store,
+            None,
+            false,
+            Some(tmp.path()),
+            crate::format::OutputFormat::Text,
+        )?;
 
         // Should report unmodeled (advisory) but return ok since no stale entities
         assert!(output.text.contains("unmodeled"));
@@ -394,13 +389,26 @@ mod tests {
 
         // Create project and init
         make_rust_project(tmp.path(), &["hello"]);
-        init_cmd::execute(&store, &tmp.path().to_path_buf(), false, None, None)?;
+        init_cmd::execute(
+            &store,
+            &tmp.path().to_path_buf(),
+            false,
+            None,
+            None,
+            crate::format::OutputFormat::Text,
+        )?;
 
         // Remove the function
         fs::write(tmp.path().join("src/main.rs"), "")?;
 
         // Run verify --scan --clean
-        let output = execute(&store, None, true, Some(tmp.path()))?;
+        let output = execute(
+            &store,
+            None,
+            true,
+            Some(tmp.path()),
+            crate::format::OutputFormat::Text,
+        )?;
         assert!(
             output.text.contains("cleaned"),
             "expected 'cleaned' in: {}",
@@ -408,7 +416,13 @@ mod tests {
         );
 
         // Verify again — should be clean now
-        let output = execute(&store, None, false, Some(tmp.path()))?;
+        let output = execute(
+            &store,
+            None,
+            false,
+            Some(tmp.path()),
+            crate::format::OutputFormat::Text,
+        )?;
         assert!(output.text.contains("verify: ok"));
 
         Ok(())
@@ -426,13 +440,26 @@ mod tests {
         fs::write(src.join("db.rs"), "fn connect() {}\n")?;
 
         // Init to populate the model with all scanned entities
-        init_cmd::execute(&store, &tmp.path().to_path_buf(), false, None, None)?;
+        init_cmd::execute(
+            &store,
+            &tmp.path().to_path_buf(),
+            false,
+            None,
+            None,
+            crate::format::OutputFormat::Text,
+        )?;
 
         // Remove db.rs — db::connect becomes stale, but it's out of the auth scope
         fs::remove_file(src.join("db.rs"))?;
 
         // Verify with --scope auth — should NOT report unmodeled for out-of-scope entities
-        let output = execute(&store, Some("auth"), false, Some(tmp.path()))?;
+        let output = execute(
+            &store,
+            Some("auth"),
+            false,
+            Some(tmp.path()),
+            crate::format::OutputFormat::Text,
+        )?;
         assert!(
             !output.text.contains("unmodeled"),
             "out-of-scope entities should not be reported as unmodeled: {}",
@@ -457,7 +484,7 @@ mod tests {
         )?;
 
         // auth::validate_credentials does NOT exist in the model → dangling grounds
-        let output = execute(&store, None, false, None)?;
+        let output = execute(&store, None, false, None, crate::format::OutputFormat::Text)?;
         assert_eq!(output.exit_code, 1);
         assert!(output.text.contains("DanglingGrounds"));
         assert!(
@@ -488,7 +515,7 @@ mod tests {
             None,
         )?;
 
-        let output = execute(&store, None, false, None)?;
+        let output = execute(&store, None, false, None, crate::format::OutputFormat::Text)?;
         assert!(output.text.contains("verify: ok"));
         assert_eq!(output.exit_code, 0);
         Ok(())

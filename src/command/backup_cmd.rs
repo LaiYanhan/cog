@@ -3,12 +3,16 @@ use anyhow::Result;
 use crate::backup::BackupManager;
 use crate::command::CommandOutput;
 
-pub fn create(mgr: &BackupManager, name: Option<String>) -> Result<CommandOutput> {
+pub fn create(
+    repo: &dyn crate::repo::Repository,
+    mgr: &BackupManager,
+    name: Option<String>,
+) -> Result<CommandOutput> {
     let backup_name = name.unwrap_or_else(|| {
         let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
         format!("backup-{ts}")
     });
-    let path = mgr.create(&backup_name)?;
+    let path = mgr.create(repo, &backup_name)?;
     Ok(CommandOutput::success(format!(
         "backup created: {backup_name} ({})",
         path.display()
@@ -29,7 +33,9 @@ pub fn list(mgr: &BackupManager) -> Result<CommandOutput> {
 
 pub fn restore(mgr: &BackupManager, name: &str) -> Result<CommandOutput> {
     mgr.restore(name)?;
-    Ok(CommandOutput::success(format!("restored from backup: {name}")))
+    Ok(CommandOutput::success(format!(
+        "restored from backup: {name}"
+    )))
 }
 
 pub fn drop(mgr: &BackupManager, name: &str) -> Result<CommandOutput> {
