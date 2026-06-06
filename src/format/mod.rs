@@ -1,3 +1,4 @@
+pub mod json;
 pub mod text;
 
 pub use text::TextRenderer;
@@ -11,46 +12,22 @@ pub enum OutputFormat {
     Json,
 }
 
+/// Types that can render themselves as human-readable text.
+pub trait Renderable {
+    fn render_text(&self) -> String;
+}
+
+/// Route a report to text or JSON based on output format.
+pub fn emit_report<T: serde::Serialize + Renderable>(report: &T, format: OutputFormat) -> String {
+    match format {
+        OutputFormat::Text => report.render_text(),
+        OutputFormat::Json => json::JsonRender::render(report),
+    }
+}
+
 // Free function re-exports for backward compatibility with command modules.
 pub fn short_id(id: &str) -> &str {
     TextRenderer::short_id(id)
-}
-pub fn query_report(
-    entity: &Entity,
-    assertions: &[(Assertion, Vec<Evidence>)],
-    related: &[RelatedEntity],
-) -> String {
-    TextRenderer::query_report(entity, assertions, related)
-}
-pub fn cascade_report(result: &CascadeReport) -> String {
-    TextRenderer::cascade_report(result)
-}
-pub fn impact_report(result: &ImpactCard) -> String {
-    TextRenderer::impact_report(result)
-}
-pub fn trace_report(result: &TraceTree) -> String {
-    TextRenderer::trace_report(result)
-}
-pub fn stats_report(stats: &ModelStats) -> String {
-    TextRenderer::stats_report(stats)
-}
-pub fn entity_index_with_counts(entities: &[(Entity, usize)]) -> String {
-    TextRenderer::entity_index_with_counts(entities)
-}
-pub fn diff_summary(summary: &crate::repo::diff::DiffSummary) -> String {
-    TextRenderer::diff_summary(summary)
-}
-pub fn diff_item_detail(index: usize, item: &crate::repo::diff::DiffItem) -> String {
-    TextRenderer::diff_item_detail(index, item)
-}
-pub fn merge_plan(diff: &crate::repo::diff::ModelDiff) -> String {
-    TextRenderer::merge_plan(diff)
-}
-pub fn item_label(item: &crate::repo::diff::DiffItem) -> String {
-    TextRenderer::item_label(item)
-}
-pub fn branch_list_report(branches: &[crate::repo::branch::BranchInfo]) -> String {
-    TextRenderer::branch_list_report(branches)
 }
 pub fn assertion_created(
     assertion: &Assertion,

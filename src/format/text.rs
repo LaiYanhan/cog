@@ -1,8 +1,6 @@
 use std::fmt::Write;
 
 use crate::domain::*;
-use crate::repo::branch::BranchInfo;
-use crate::repo::diff::{DiffItem, DiffSummary, ModelDiff};
 
 pub struct TextRenderer;
 
@@ -65,9 +63,15 @@ impl TextRenderer {
         let has_metrics = m.fan_in.is_some() || m.fan_out.is_some() || m.line_count.is_some();
         if has_metrics {
             let mut parts = Vec::new();
-            if let Some(fi) = m.fan_in { parts.push(format!("fan_in={fi}")); }
-            if let Some(fo) = m.fan_out { parts.push(format!("fan_out={fo}")); }
-            if let Some(lc) = m.line_count { parts.push(format!("lines={lc}")); }
+            if let Some(fi) = m.fan_in {
+                parts.push(format!("fan_in={fi}"));
+            }
+            if let Some(fo) = m.fan_out {
+                parts.push(format!("fan_out={fo}"));
+            }
+            if let Some(lc) = m.line_count {
+                parts.push(format!("lines={lc}"));
+            }
             parts.push(format!("risk={}", m.risk_level()));
             let _ = writeln!(out, "metrics: {}", parts.join(", "));
         }
@@ -159,6 +163,24 @@ impl TextRenderer {
             for assertion in &result.affected_assertions {
                 let _ = writeln!(out, "- {}", Self::assertion_oneline(assertion));
             }
+        }
+
+        if let Some(risk) = &result.risk_assessment {
+            out.push_str(&format!(
+                "\nrisk: {} ({:.2})\n  downstream: {} | assertions: {} | fragile: {}\n  {}\n",
+                if risk.risk_score >= 0.8 {
+                    "HIGH"
+                } else if risk.risk_score >= 0.5 {
+                    "MEDIUM"
+                } else {
+                    "LOW"
+                },
+                risk.risk_score,
+                risk.downstream_count,
+                risk.active_assertions,
+                risk.fragile_assertions,
+                risk.summary,
+            ));
         }
 
         out
@@ -253,170 +275,6 @@ impl TextRenderer {
         out
     }
 
-    pub fn diff_summary(summary: &DiffSummary) -> String {
-        let mut out = String::new();
-        let _ = writeln!(out, "diff: {} change(s)", summary.total);
-
-        let mut row = |label: &str, count: usize, sign: &str| {
-            if count > 0 {
-                let _ = writeln!(out, "  {label}: {sign}{count}");
-            }
-        };
-
-        row("entities", summary.entities_added, "+");
-        row("entities", summary.entities_removed, "-");
-        row("assertions", summary.assertions_added, "+");
-        row("assertions", summary.assertions_removed, "-");
-        row("assertions", summary.assertions_changed, "~");
-        row("evidences", summary.evidences_added, "+");
-        row("evidences", summary.evidences_removed, "-");
-        row("entity_relations", summary.entity_relations_added, "+");
-        row("entity_relations", summary.entity_relations_removed, "-");
-        row(
-            "assertion_relations",
-            summary.assertion_relations_added,
-            "+",
-        );
-        row(
-            "assertion_relations",
-            summary.assertion_relations_removed,
-            "-",
-        );
-        out
-    }
-
-    pub fn diff_item_detail(index: usize, item: &DiffItem) -> String {
-        let mut out = String::new();
-        let _ = writeln!(out, "[{}] {}", index, Self::item_label(item));
-
-        match item {
-            DiffItem::EntityAdded(e) | DiffItem::EntityRemoved(e) => {
-                let _ = writeln!(out, "  id: {}", Self::short_id(&e.id));
-                let _ = writeln!(out, "  name: {}", e.qualified_name);
-                let _ = writeln!(out, "  kind: {}", e.kind);
-            }
-            DiffItem::AssertionAdded(a) | DiffItem::AssertionRemoved(a) => {
-                let _ = writeln!(out, "  id: {}", Self::short_id(&a.id));
-                let _ = writeln!(out, "  kind: {}", a.kind);
-                let _ = writeln!(out, "  status: {}", a.status);
-                let _ = writeln!(out, "  claim: {}", a.claim);
-            }
-            DiffItem::AssertionChanged(change) => {
-                let _ = writeln!(out, "  id: {}", Self::short_id(&change.before.id));
-                let _ = writeln!(out, "  fields: {}", change.changed_fields.join(", "));
-                let _ = writeln!(out, "  before:");
-                let _ = writeln!(out, "    kind: {}", change.before.kind);
-                let _ = writeln!(out, "    status: {}", change.before.status);
-                let _ = writeln!(out, "    claim: {}", change.before.claim);
-                let _ = writeln!(out, "  after:");
-                let _ = writeln!(out, "    kind: {}", change.after.kind);
-                let _ = writeln!(out, "    status: {}", change.after.status);
-                let _ = writeln!(out, "    claim: {}", change.after.claim);
-            }
-            DiffItem::EvidenceAdded(e) | DiffItem::EvidenceRemoved(e) => {
-                let _ = writeln!(out, "  id: {}", Self::short_id(&e.id));
-                let _ = writeln!(out, "  source: {}", e.source);
-                let _ = writeln!(out, "  detail: {}", e.detail);
-            }
-            DiffItem::EntityRelationAdded(r) | DiffItem::EntityRelationRemoved(r) => {
-                let _ = writeln!(out, "  id: {}", Self::short_id(&r.id));
-                let _ = writeln!(out, "  from: {}", Self::short_id(&r.from_entity));
-                let _ = writeln!(out, "  to: {}", Self::short_id(&r.to_entity));
-                let _ = writeln!(out, "  kind: {}", r.kind);
-            }
-            DiffItem::AssertionRelationAdded(r) | DiffItem::AssertionRelationRemoved(r) => {
-                let _ = writeln!(out, "  id: {}", Self::short_id(&r.id));
-                let _ = writeln!(out, "  from: {}", Self::short_id(&r.from_assertion));
-                let _ = writeln!(out, "  to: {}", Self::short_id(&r.to_assertion));
-                let _ = writeln!(out, "  kind: {}", r.kind);
-            }
-        }
-        out
-    }
-
-    pub fn merge_plan(diff: &ModelDiff) -> String {
-        let items = diff.items();
-        if items.is_empty() {
-            return "merge: no changes to apply".to_string();
-        }
-
-        let mut out = String::new();
-        let _ = writeln!(out, "merge: {} item(s) pending", items.len());
-        for (i, item) in items.iter().enumerate() {
-            let _ = writeln!(out, "  [{}] [pending] {}", i, Self::item_label(item));
-        }
-        out
-    }
-
-    pub fn item_label(item: &DiffItem) -> String {
-        match item {
-            DiffItem::EntityAdded(e) => format!("+entity {} [{}]", e.qualified_name, e.kind),
-            DiffItem::EntityRemoved(e) => format!("-entity {} [{}]", e.qualified_name, e.kind),
-            DiffItem::AssertionAdded(a) => {
-                format!("+assertion {}|{}: {}", a.kind, a.status, a.claim)
-            }
-            DiffItem::AssertionRemoved(a) => {
-                format!("-assertion {}|{}: {}", a.kind, a.status, a.claim)
-            }
-            DiffItem::AssertionChanged(c) => {
-                format!(
-                    "~assertion {} ({} → {})",
-                    Self::short_id(&c.before.id),
-                    c.before.status,
-                    c.after.status
-                )
-            }
-            DiffItem::EvidenceAdded(e) => format!("+evidence {}:{}", e.source, e.detail),
-            DiffItem::EvidenceRemoved(e) => format!("-evidence {}:{}", e.source, e.detail),
-            DiffItem::EntityRelationAdded(r) => {
-                format!(
-                    "+entity_relation {} --{}--> {}",
-                    Self::short_id(&r.from_entity),
-                    r.kind,
-                    Self::short_id(&r.to_entity)
-                )
-            }
-            DiffItem::EntityRelationRemoved(r) => {
-                format!(
-                    "-entity_relation {} --{}--> {}",
-                    Self::short_id(&r.from_entity),
-                    r.kind,
-                    Self::short_id(&r.to_entity)
-                )
-            }
-            DiffItem::AssertionRelationAdded(r) => {
-                format!(
-                    "+dep {} → {}",
-                    Self::short_id(&r.from_assertion),
-                    Self::short_id(&r.to_assertion)
-                )
-            }
-            DiffItem::AssertionRelationRemoved(r) => {
-                format!(
-                    "-dep {} → {}",
-                    Self::short_id(&r.from_assertion),
-                    Self::short_id(&r.to_assertion)
-                )
-            }
-        }
-    }
-
-    pub fn branch_list_report(branches: &[BranchInfo]) -> String {
-        if branches.is_empty() {
-            return "branches: (none)".to_string();
-        }
-        let mut out = String::new();
-        for b in branches {
-            let size_kb = b.size_bytes as f64 / 1024.0;
-            let modified = b
-                .modified
-                .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
-                .unwrap_or_else(|| "?".to_string());
-            let _ = writeln!(out, "- {} ({}KB, {})", b.name, size_kb as u64, modified);
-        }
-        out
-    }
-
     pub fn assertion_created(
         assertion: &Assertion,
         entity: &Entity,
@@ -444,5 +302,163 @@ impl TextRenderer {
             "dependency recorded\n- from: {}\n- to: {}\n- kind: {}\n",
             from.qualified_name, to.qualified_name, kind
         )
+    }
+
+    pub fn init_report(report: &InitReport) -> String {
+        let mut out = String::new();
+        let lang_summary = {
+            let mut entries: Vec<_> = report.files_by_language.iter().collect();
+            entries.sort_by(|a, b| b.1.cmp(a.1));
+            entries
+                .iter()
+                .map(|(lang, count)| format!("{lang}: {count}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        if report.dry_run {
+            let _ = std::fmt::Write::write_fmt(
+                &mut out,
+                format_args!(
+                    "DRY RUN — no changes written\n\nScanned {} files ({})\n",
+                    report.files_scanned, lang_summary
+                ),
+            );
+            let def_count: usize = report.entity_counts_by_kind.values().sum();
+            let _ = std::fmt::Write::write_fmt(
+                &mut out,
+                format_args!("Would create {} definitions\n\n", def_count),
+            );
+        } else {
+            let _ = std::fmt::Write::write_fmt(
+                &mut out,
+                format_args!(
+                    "Scanned {} files ({})\nCreated {} entities, {} relations\n\n",
+                    report.files_scanned,
+                    lang_summary,
+                    report.entities_created,
+                    report.relations_created,
+                ),
+            );
+        }
+
+        let kind_order = ["module", "type", "function", "method", "field"];
+        for &kind_name in &kind_order {
+            if let Some(&count) = report.entity_counts_by_kind.get(kind_name)
+                && count > 0
+            {
+                let label = kind_name;
+                let pad = 10usize.saturating_sub(label.len());
+                let pad_str = " ".repeat(pad);
+                let _ = std::fmt::Write::write_fmt(
+                    &mut out,
+                    format_args!("  {label}:{pad_str}{count}\n"),
+                );
+            }
+        }
+
+        if !report.dry_run {
+            let _ = std::fmt::Write::write_fmt(
+                &mut out,
+                format_args!("\nNext: cog index | cog trace <entity>\n"),
+            );
+        }
+        out
+    }
+
+    pub fn verification_report(report: &VerificationReport) -> String {
+        let mut out = String::new();
+        if report.success {
+            let _ = std::fmt::Write::write_fmt(
+                &mut out,
+                format_args!(
+                    "verify: ok (checked {} entities, {} cleaned)\n",
+                    report.checked_count, report.cleaned_count,
+                ),
+            );
+        } else {
+            let _ = std::fmt::Write::write_fmt(
+                &mut out,
+                format_args!("verify: found {} issue(s)\n", report.issues.len(),),
+            );
+            for issue in &report.issues {
+                let _ = std::fmt::Write::write_fmt(
+                    &mut out,
+                    format_args!(
+                        "- {:?} entity={} assertion={} detail={}\n",
+                        issue.kind,
+                        issue.entity_name.as_deref().unwrap_or("-"),
+                        issue
+                            .assertion_id
+                            .as_deref()
+                            .map(|id| if id.len() >= 8 { &id[..8] } else { id })
+                            .unwrap_or("-"),
+                        issue.detail,
+                    ),
+                );
+            }
+        }
+        for line in &report.scan_issues {
+            let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{line}\n"));
+        }
+        out
+    }
+}
+
+// ── Renderable impls ──────────────────────────────────────────────────────
+
+use crate::format::Renderable;
+
+impl Renderable for CascadeReport {
+    fn render_text(&self) -> String {
+        TextRenderer::cascade_report(self)
+    }
+}
+
+impl Renderable for ImpactCard {
+    fn render_text(&self) -> String {
+        TextRenderer::impact_report(self)
+    }
+}
+
+impl Renderable for TraceTree {
+    fn render_text(&self) -> String {
+        TextRenderer::trace_report(self)
+    }
+}
+
+impl Renderable for ModelStats {
+    fn render_text(&self) -> String {
+        TextRenderer::stats_report(self)
+    }
+}
+
+impl Renderable for QueryCard {
+    fn render_text(&self) -> String {
+        TextRenderer::query_report(&self.entity, &self.assertions, &self.related)
+    }
+}
+
+impl Renderable for EntityIndex {
+    fn render_text(&self) -> String {
+        TextRenderer::entity_index_with_counts(&self.entities)
+    }
+}
+
+impl Renderable for InitReport {
+    fn render_text(&self) -> String {
+        TextRenderer::init_report(self)
+    }
+}
+
+impl Renderable for VerificationReport {
+    fn render_text(&self) -> String {
+        TextRenderer::verification_report(self)
+    }
+}
+
+impl Renderable for StatusMessage {
+    fn render_text(&self) -> String {
+        self.message.clone()
     }
 }
