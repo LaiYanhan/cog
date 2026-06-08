@@ -11,17 +11,35 @@ Experiments test "what if" scenarios on lightweight in-memory snapshots
 
 | Command | Purpose |
 |---------|---------|
+| `cog experiment try <entity> --kind <k> --claim "<t>" --grounds "<s>" [--desc "<d>"]` | Quick one-liner: start + hypothesize + evaluate |
 | `cog experiment start <entity> --desc "<desc>"` | Start experiment on an entity's dependency subgraph |
 | `cog experiment hypothesize <id> --assert ...` | Inject hypothetical assertion |
 | `cog experiment hypothesize <id> --delete <entity>` | Inject hypothetical entity deletion |
-| `cog experiment evaluate <id>` | Evaluate impact of all staged operations |
+| `cog experiment evaluate <id>` | Evaluate impact of all staged operations. Returns risk, contradictions, scout suggestions. |
 | `cog experiment report <id>` | Show full experiment report |
-| `cog experiment save <id>` | Mark as saved checkpoint (cross-session recovery) |
 | `cog experiment commit <id>` | Replay staged operations to real model |
 | `cog experiment discard <id>` | Discard experiment |
-| `cog experiment list` | List all experiments (draft/saved) |
+| `cog experiment list` | List all experiments |
 
-### Workflow
+### Quick Workflow (covers 80% of scenarios)
+
+```bash
+# One-liner: start + hypothesize + evaluate
+cog experiment try auth::login --kind correction \
+    --claim "now accepts (user, pass, rate_limit)" \
+    --grounds "hypothesis:rate-limit-feature" \
+    --desc "add rate_limit parameter to login"
+
+# → Risk: High (0.82)
+# → Contradictions: api::login_handler expects 2 params
+# → Scout before implementing: [read] api::login_handler — verify current signature
+
+# Commit or discard
+cog experiment commit <id>
+cog experiment discard <id>
+```
+
+### Step-by-Step Workflow (complex scenarios)
 
 ```bash
 # 1. Start an experiment around a focal entity
@@ -37,9 +55,11 @@ cog experiment evaluate <id>
 # → Risk: High (0.82)
 # → Affected: 7 assertions
 # → Contradictions: api::login_handler expects 2 params
+# → Scout before implementing: [read] api::login_handler — verify current signature
 
-# 4. Save as checkpoint for cross-session recovery
-cog experiment save <id>
+# 4. After scouting, re-evaluate if needed (supports Phase 3/4 loop)
+cog experiment hypothesize <id> --delete some_entity   # adjust plan
+cog experiment evaluate <id>                           # re-evaluate
 
 # 5. Commit (replay to real model) or discard
 cog experiment commit <id>
@@ -56,12 +76,6 @@ Commit is deterministic replay of staged operations:
 
 No diff-merge, no UUID conflict resolution. The experiment records operations
 (intent), not state diffs — replay is deterministic.
-
-### Draft vs Saved
-
-- Experiments are auto-persisted as `saved: false` (draft) on creation.
-- `save` marks them as a named checkpoint.
-- `list` displays draft/saved status.
 
 ---
 
@@ -100,9 +114,9 @@ cog backup drop "before-refactor"
 
 | Scenario | Tool |
 |----------|------|
-| "What if I change this one entity's contract?" | Experiment |
+| "What if I change this one entity's contract?" | Experiment (`try`) |
 | "What if I delete this module?" | Experiment |
 | "I'm about to refactor the entire persistence layer" | Backup |
 | "I'm about to change the schema" | Backup |
 | Quick hypothesis test, discard if wrong | Experiment |
-| Need to save and resume across sessions | Experiment (save checkpoint) |
+| Need to save and resume across sessions | Experiment |

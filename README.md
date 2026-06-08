@@ -12,8 +12,8 @@ The binary is `./target/release/cog`.
 
 ## Quickstart
 ```sh
-# Auto-scan codebase structure (entities + containment)
-cog init .
+# Auto-scan codebase structure (entities + relations, idempotent)
+cog sync .
 
 # Check suggested next actions
 cog next
@@ -35,13 +35,13 @@ cog verify --scan
 ### Scanning
 
 ```sh
-# Auto-scan a codebase — creates entities + contains relations for all definitions
-cog init [PATH]
-cog init .                      # scan current directory
-cog init src/                   # scan a subtree
-cog init . --lang rust          # filter to one language
-cog init . --depth 3            # limit directory depth
-cog init . --dry-run            # preview without writing
+# Idempotent full scan — creates entities + relations, cleans stale
+cog sync [PATH]
+cog sync .                      # scan current directory
+cog sync src/                   # scan a subtree
+cog sync . --lang python,rust   # filter to specific languages
+cog sync . --depth 3            # limit directory depth
+cog sync . --dry-run            # preview without writing
 
 # Detect drift between model and actual code
 cog verify --scan               # list stale (removed) and unmodeled (new) entities
@@ -74,6 +74,7 @@ cog delete-entity <qualified_name>
 # Query assertions for an entity (active only by default)
 cog query <entity>
 cog query <entity> --all          # include retracted
+cog query <entity> --compact      # compact mode for embedded use
 
 # Show downstream impact (BFS through entity relations)
 cog impact <entity>
@@ -81,11 +82,13 @@ cog impact <entity>
 # Full dependency chain + entity relations
 cog trace <entity>
 
-# List all entities with assertion counts
+# Coverage summary (default), or full listing with --verbose
 cog index
 cog index --kind function       # filter to functions
-cog index --origin scan         # filter to auto-scanned entities
+cog index --uncovered           # only entities without assertions
 cog index --prefix auth::       # filter by qualified name prefix
+cog index --verbose             # full listing
+
 # Structural consistency checks
 cog verify --scan                      # detect stale/unmodeled code
 cog verify --scan --scan-path src/     # scan a specific directory
@@ -105,42 +108,20 @@ cog export --format dot
 ### Workflow state machine
 
 cog tracks workflow state in `.cog/workflow_state.json`. Commands implicitly
-transition state (e.g. `verify` after a change moves to PostChange), and
+transition state (e.g. `sync` detecting code drift moves to PostChange), and
 `cog next` reads the current state plus model data to suggest the next action.
 
 ```sh
 # Show suggested next actions based on current state and model data
 cog next
-
-# Begin tracking a code change (only allowed from Ready state)
-cog start-change "Add retry logic to auth::login"
-cog start-change "Refactor cache layer" --entity cache --entity cache::evict
-
-# After the change, verify consistency
-cog verify --scan
-
-# Complete the change cycle (returns to Ready)
-cog finish-change
-
-# Or abandon the change mid-cycle
-cog abort-change
 ```
 
-Workflow commands:
+State transitions are automatic — `sync` detects code changes, `retract`
+triggers Debugging, `assert` moves from FreshScan/PostChange to Exploring.
+No manual `start-change`/`finish-change`/`abort-change` commands.
 
-| Command | Description |
-|---|---|
-| `cog next` | Show suggested actions given current workflow state |
-| `cog start-change "<desc>"` | Begin a tracked change cycle |
-| `cog start-change "<desc>"` | Begin a tracked change cycle |
-| `cog abort-change` | Abandon the change cycle and return to Ready |
-
-Typical cycle: `cog next` → `cog start-change "..."` → make code changes →
-`cog verify --scan` → `cog assert` (record what you learned) → `cog finish-change`.
-
-
-For deep speculative exploration, use experiments or full backups (see below).
-
+Typical cycle: `cog sync .` → `cog next` → make code changes →
+`cog verify --scan` → `cog assert` (record what you learned).
 
 ### Experiment workflow (hypothesis testing)
 
@@ -148,41 +129,40 @@ Experiments test "what if" scenarios on a lightweight in-memory snapshot
 without copying the entire database.
 
 ```sh
-# Start an experiment around a focal entity
-cog experiment start auth::login --desc "what if login takes 3 params?"
+# Quick one-liner: start + hypothesize + evaluate in one command
+cog experiment try <entity> --kind correction \
+    --claim "change X to Y" --grounds "code:<entity>" \
+    --desc "what if we change X?" [--depends-on <id>]
 
-# Inject hypothetical operations
+# Or step-by-step for complex scenarios:
+cog experiment start auth::login --desc "what if login takes 3 params?"
 cog experiment hypothesize <id> --assert auth::login \
     --kind contract --claim "now accepts (user, pass, rate_limit)" \
     --grounds "hypothesis:rate-limit-feature"
-
-# Evaluate impact
 cog experiment evaluate <id>
-
-# Save as checkpoint for cross-session recovery
-cog experiment save <id>
 
 # Commit (replay staged ops to real DB) or discard
 cog experiment commit <id>
 cog experiment discard <id>
 
-# List all experiments
+# List all experiments, show detailed report
 cog experiment list
+cog experiment report <id>
 ```
 
 Experiment commands:
 
 | Command | Description |
 |---|---|
+| `cog experiment try <entity> --kind ...` | Start + hypothesize + evaluate in one step |
 | `cog experiment start <entity> --desc "<desc>"` | Start hypothesis experiment |
 | `cog experiment hypothesize <id> --assert ...` | Inject hypothetical assertion |
 | `cog experiment hypothesize <id> --delete <entity>` | Inject hypothetical entity deletion |
 | `cog experiment evaluate <id>` | Evaluate impact of staged operations |
 | `cog experiment report <id>` | Show full experiment report |
-| `cog experiment save <id>` | Mark as saved checkpoint |
 | `cog experiment commit <id>` | Replay staged ops to real model |
 | `cog experiment discard <id>` | Discard experiment |
-| `cog experiment list` | List all experiments (draft/saved) |
+| `cog experiment list` | List all experiments |
 
 
 ### Backup workflow (full model snapshots)
@@ -241,9 +221,9 @@ Do **not** use `depends_on` for entity relations — that is an assertion-level 
 - **Evidence** — source material backing an assertion (code reference, manual review, test)
 - **Dependency** — assertion-level `depends-on` chain; when a base assertion is retracted, dependents cascade to `uncertain` (TMS-style truth maintenance)
 - **Retraction** — marks an assertion as retracted and cascades `uncertain` to dependent assertions that have no other active support
-- **Experiment** — lightweight hypothesis testing on in-memory snapshots; commit replays staged operations to the real model
+- **Sync** — tree-sitter based code structure analysis, idempotent and repeatable. Walks directories, parses source files into ASTs, extracts definitions (functions/classes/structs/methods), creates entities + `contains` relations, cleans up stale entities (skipping those with existing assertions). All auto-created entities carry origin `Scan`.
+- **Experiment** — lightweight hypothesis testing on in-memory snapshots; `try` for quick one-liners, step-by-step for complex scenarios. Commit replays staged operations to the real model.
 - **Backup** — full DB snapshot (VACUUM INTO) for safety nets before large-scale refactors
-- **Scan** — tree-sitter based code structure analysis. `cog init` walks directories, parses files into ASTs, extracts functions/classes/methods/types, and creates entities + `contains` relations. All auto-created entities are grounded `auto:scan`, clearly separated from LLM-authored knowledge.
 
 ## Ids
 

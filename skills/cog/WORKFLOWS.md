@@ -5,17 +5,17 @@ step-by-step guidance — these are the concepts behind the suggestions.
 
 ## Structural Scan + Semantic Deepening
 
-`cog init` gives you structure (entity names, kinds, containment, imports).
+`cog sync` gives you structure (entity names, kinds, containment, imports).
 Your job is to add semantics — the *why*, the *what-could-break*, the
 *what-it-promises*. That's the irreplaceable value an LLM provides over a parser.
 
-All auto-generated entities carry grounds `auto:scan` so you can distinguish
+All auto-generated entities carry origin `Scan` so you can distinguish
 them from manually asserted knowledge.
 
 ```bash
-cog init .                    # structural skeleton
+cog sync .                    # structural skeleton (idempotent, repeatable)
 cog next                      # see what the model needs
-cog index                     # entities sorted by assertion count
+cog index                     # coverage summary by module
 ```
 
 ## Progressive Grounding Lifecycle

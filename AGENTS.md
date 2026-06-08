@@ -73,7 +73,7 @@ cargo run -- experiment start <entity> -- start a hypothesis experiment
 cargo run -- backup create --name <name> -- create a full model backup
 
 # Direct binary (after build)
-./target/release/cog init .
+./target/release/cog sync .
 ```
 
 **No formatter/linter config overrides** — rustfmt and clippy use all defaults. No pre-commit hooks, no CI config in the repo.

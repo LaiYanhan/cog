@@ -1,6 +1,6 @@
 ---
 name: cog
-description: "Cognitive model CLI for LLM coding agents. Use when the agent needs to record, query, or reason about codebase knowledge: contracts, invariants, dependencies, fragility points. Activated by: cog assert/retract/query/impact/trace/depend/verify/export/stats/index/delete-entity/experiment/backup commands."
+description: "Cognitive model CLI for LLM coding agents. Use when the agent needs to record, query, or reason about codebase knowledge: contracts, invariants, dependencies, fragility points. Activated by: cog assert/retract/query/impact/trace/depend/verify/export/stats/index/delete-entity/sync/experiment/backup commands."
 ---
 
 # cog — Cognitive Model for Coding Agents
@@ -16,7 +16,7 @@ those claims, and reason about impact when things change.
 **Entity** — a qualified name for a code construct:
 `module::function`, `crate::module::Type`. Kinds are inferred:
 `Module` (contains `::` but not `::camelCase`), `Function` (`::camelCase` ending),
-`Type` (`::PascalCase` ending). Created implicitly by `assert`.
+`Type` (`::PascalCase` ending). Created automatically by `sync` or implicitly by `assert`.
 
 **Assertion** — a knowledge claim about an entity. Each has a `kind`
 (contract / intent / invariant / fragility / correction), a `claim`
@@ -51,26 +51,27 @@ accepting IDs resolve short IDs automatically.
 
 | Command | Purpose |
 |---------|---------|
-| `cog init [PATH] [--dry-run] [--depth <N>] [--lang python,rust,...]` | Scan a codebase with tree-sitter, creating entities for definitions (functions, classes, structs, methods), directory modules, and import relationships. All auto-generated entities carry grounds `auto:scan`. |
+| `cog sync [PATH] [--dry-run] [--depth <N>] [--lang python,rust,...]` | Idempotent full scan with tree-sitter. Creates entities for definitions (functions, classes, structs, methods), directory modules, import relationships, and cleans up stale entities (skipping those with assertions). All auto-generated entities carry origin `Scan`. Replaces the removed `cog init`. |
 
 ### Writing
 
 | Command | Purpose |
 |---------|---------|
-| `cog assert <entity> --kind <kind> --claim "<text>" --grounds "<source>" [--depends-on <id>]` | Record a knowledge claim |
-| `cog depend <entity_a> --on <entity_b> --kind contains\|calls\|uses` | Link two entities structurally |
-| `cog retract <id> --reason "<why>"` | Retract a claim (cascades to dependents) |
+| `cog assert <entity> --kind <kind> --claim "<text>" --grounds "<source>" [--depends-on <id>]` | Record a knowledge claim. Returns the entity's full assert state (new assertion highlighted). |
+| `cog depend <entity_a> --on <entity_b> --kind contains\|calls\|uses` | Link two entities structurally. Returns the entity's full relation set. |
+| `cog retract <id> --reason "<why>"` | Retract a claim. Cascades to dependents. Returns entity's remaining assertions with status marks. |
 | `cog delete-entity <qualified_name>` | Delete entity + all assertions, evidence, relations, changelog. Irreversible. |
 
 ### Reading
 
 | Command | Purpose |
 |---------|---------|
-| `cog query <entity> [--all]` | Show active (or all) assertions for an entity |
-| `cog impact <entity>` | BFS downstream impact — what changes if this entity changes? |
+| `cog query <entity> [--all] [--compact]` | Show active assertions for an entity. `--all` includes retracted. `--compact` emits one assertion per line for embedded use. |
+| `cog impact <entity>` | BFS downstream impact with risk assessment (HIGH/MEDIUM/LOW) and per-entity covered/blind markers |
 | `cog trace <entity>` | Full picture: assertions, evidence, depends-on tree, entity relations |
-| `cog index` | List all entities sorted by active assertion count |
-| `cog stats` | Model statistics (entity/assertion/relation counts) |
+| `cog index [--uncovered] [--verbose] [--kind <k>] [--prefix <p>]` | Coverage summary by default; `--verbose` restores full listing. `--uncovered` shows only unasserted entities. |
+| `cog next` | Single entry point: model summary, active experiments, suggestions, stagnation warnings |
+| `cog stats` | Detailed model statistics (entity/assertion/relation counts) |
 | `cog verify [--scope <entity>] [--clean] [--scan]` | Structural consistency check. `--scan` also compares the model against the actual codebase, reporting unmodeled and stale entities. |
 | `cog export [--format json\|toml\|dot]` | Export model in machine-readable format |
 
@@ -78,15 +79,15 @@ accepting IDs resolve short IDs automatically.
 
 | Command | Purpose |
 |---------|---------|
+| `cog experiment try <entity> --kind <k> --claim "<t>" --grounds "<s>" [--desc "<d>"] [--depends-on <id>]` | Quick one-liner: start + hypothesize + evaluate. Covers 80% of scenarios. |
 | `cog experiment start <entity> --desc "<desc>"` | Start hypothesis experiment on in-memory snapshot |
 | `cog experiment hypothesize <id> --assert ...` | Inject hypothetical assertion |
 | `cog experiment hypothesize <id> --delete <entity>` | Inject hypothetical entity deletion |
-| `cog experiment evaluate <id>` | Evaluate impact of staged operations |
+| `cog experiment evaluate <id>` | Evaluate impact of staged operations — returns risk, contradictions, scout suggestions |
 | `cog experiment report <id>` | Show full experiment report |
-| `cog experiment save <id>` | Mark experiment as saved checkpoint |
 | `cog experiment commit <id>` | Replay staged operations to real model |
 | `cog experiment discard <id>` | Discard experiment |
-| `cog experiment list` | List all experiments (draft/saved) |
+| `cog experiment list` | List all experiments |
 | `cog backup create --name <name>` | Full DB snapshot (VACUUM INTO) |
 | `cog backup list` | List all backups |
 | `cog backup restore <name>` | Restore backup as active model |
