@@ -192,6 +192,25 @@ impl SemanticSpace {
             structure.dependencies_of(entity_id);
         let downstream_count = downstream.len();
 
+        // Compute downstream coverage: ratio of downstream entities that have
+        // at least one active assertion, and count unmodeled downstream entities.
+        let (downstream_coverage, unmodeled_downstream) = {
+            let downstream_with_assertions = downstream
+                .iter()
+                .filter(|dep| {
+                    self.assertions.values().any(|n| {
+                        n.assertion.entity_id == dep.entity.id
+                            && n.assertion.status == AssertionStatus::Active
+                    })
+                })
+                .count();
+            let denom = downstream_count.max(1) as f64;
+            (
+                downstream_with_assertions as f64 / denom,
+                downstream_count - downstream_with_assertions,
+            )
+        };
+
         // Risk heuristic: high downstream + many active assertions → high risk
         // Public entities add extra exposure
         let is_public = structure
@@ -217,6 +236,15 @@ impl SemanticSpace {
             base_risk
         };
 
+        // When an entity is well-asserted (>=3 active) but has no downstream
+        // dependencies, floor the risk score at 0.30 — assertions alone still
+        // signal a non-trivial maintenance surface.
+        let risk_score = if active_count >= 3 && downstream_count == 0 {
+            risk_score.max(0.30)
+        } else {
+            risk_score
+        };
+
         // Build summary
         let summary = if risk_score >= 0.8 {
             format!(
@@ -235,6 +263,8 @@ impl SemanticSpace {
             active_assertions: active_count,
             fragile_assertions: fragile_count,
             summary,
+            downstream_coverage,
+            unmodeled_downstream,
         }
     }
 }

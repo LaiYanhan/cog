@@ -29,7 +29,7 @@ mod tests {
         store.create_assertion(&a.id, AssertionKind::Contract, "a", "note:a", None)?;
         let output = execute(&store, "A", OutputFormat::Text)?;
         assert_eq!(output.exit_code, 0);
-        assert!(output.text.contains("impact_from: A"));
+        assert!(output.text.contains("Impact for: A"));
         assert!(output.text.contains("B [module]"));
         Ok(())
     }

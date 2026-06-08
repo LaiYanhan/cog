@@ -125,9 +125,9 @@ pub fn execute(
         let scan_result = Scanner::new().scan(&config)?;
 
         // Build the full set of scanned entity names: definitions + file/directory modules.
-        // This mirrors what init_cmd creates, so stale detection works for both
+        // This mirrors what sync_cmd creates, so stale detection works for both
         // function/type entities and structural module entities.
-        let path_to_qualified = crate::command::init_cmd::path_to_qualified;
+        let path_to_qualified = crate::command::sync_cmd::path_to_qualified;
         let mut scanned_names: HashSet<String> = scan_result
             .definitions
             .iter()
@@ -264,7 +264,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::execute;
-    use crate::command::init_cmd;
+    use crate::command::sync_cmd;
     use crate::domain::{AssertionKind, EntityKind, EntityOrigin, EntityRelationKind};
     use crate::repo::SqliteRepository;
 
@@ -324,7 +324,7 @@ mod tests {
 
         // Create a Rust project with one function and init (populates store with origin=Scan)
         make_rust_project(tmp.path(), &["hello"]);
-        init_cmd::execute(
+        sync_cmd::execute(
             &store,
             &tmp.path().to_path_buf(),
             false,
@@ -387,9 +387,9 @@ mod tests {
         let tmp = tempdir()?;
         let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
 
-        // Create project and init
+        // Create project and sync (populates model with Scan-origin entities)
         make_rust_project(tmp.path(), &["hello"]);
-        init_cmd::execute(
+        sync_cmd::execute(
             &store,
             &tmp.path().to_path_buf(),
             false,
@@ -401,7 +401,7 @@ mod tests {
         // Remove the function
         fs::write(tmp.path().join("src/main.rs"), "")?;
 
-        // Run verify --scan --clean
+        // Run verify --scan --clean — should detect and clean the stale entity
         let output = execute(
             &store,
             None,
@@ -414,6 +414,10 @@ mod tests {
             "expected 'cleaned' in: {}",
             output.text
         );
+
+        // The file module entity may now be isolated (its child was deleted).
+        // Clean it explicitly before the final verification.
+        execute(&store, None, true, None, crate::format::OutputFormat::Text)?;
 
         // Verify again — should be clean now
         let output = execute(
@@ -440,7 +444,7 @@ mod tests {
         fs::write(src.join("db.rs"), "fn connect() {}\n")?;
 
         // Init to populate the model with all scanned entities
-        init_cmd::execute(
+        sync_cmd::execute(
             &store,
             &tmp.path().to_path_buf(),
             false,

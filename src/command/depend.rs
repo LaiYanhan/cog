@@ -25,7 +25,8 @@ pub fn execute(
         ),
     )?;
 
-    let msg = format::dependency_recorded(&left, &right, kind);
+    let related = repo.get_related_entities(&left.id)?;
+    let msg = format::dependency_report(&left, &right, kind, &related);
     Ok(CommandOutput::success(format::emit_report(
         &StatusMessage { message: msg },
         output,

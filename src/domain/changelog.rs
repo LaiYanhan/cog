@@ -13,6 +13,7 @@ pub enum ChangelogAction {
     CascadeMark,
     Depend,
     Verify,
+    Sync,
     DeleteEntity,
 }
 
@@ -24,6 +25,7 @@ impl Display for ChangelogAction {
             Self::CascadeMark => "cascade_mark",
             Self::Depend => "depend",
             Self::Verify => "verify",
+            Self::Sync => "sync",
             Self::DeleteEntity => "delete_entity",
         })
     }
@@ -39,6 +41,7 @@ impl FromStr for ChangelogAction {
             "cascade_mark" => Ok(Self::CascadeMark),
             "depend" => Ok(Self::Depend),
             "verify" => Ok(Self::Verify),
+            "sync" => Ok(Self::Sync),
             "delete_entity" => Ok(Self::DeleteEntity),
             _ => Err("invalid changelog action"),
         }

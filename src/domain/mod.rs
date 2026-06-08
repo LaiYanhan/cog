@@ -19,7 +19,9 @@ pub use relations::{
     RelationDirection,
 };
 pub use report::{
-    AffectedAssertion, CascadeReason, CascadeReport, EntityIndex, ExportFormat, ImpactCard,
-    InitReport, ModelSnapshot, ModelStats, QueryCard, StatusMessage, TraceAssertion, TraceTree,
-    VerificationIssue, VerificationIssueKind, VerificationReport,
+    ActiveExperiment, AffectedAssertion, CascadeReason, CascadeReport, EntityIndex, ExportFormat,
+    ImpactCard, IndexCoverage, ModelSnapshot, ModelStats, ModuleCoverage, NextModelSummary,
+    NextReport, NextSuggestion, QueryCard, ScoutAction, ScoutSuggestion, StatusMessage, SyncReport,
+    TopUncovered, TraceAssertion, TraceTree, VerificationIssue, VerificationIssueKind,
+    VerificationReport,
 };

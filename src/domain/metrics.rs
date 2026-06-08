@@ -44,38 +44,9 @@ impl Display for Visibility {
         }
     }
 }
-
 impl EntityMetrics {
     /// A zero-metrics instance used for manually created entities.
     pub fn empty() -> Self {
         Self::default()
-    }
-
-    /// Risk heuristic: high fan_in + high line_count → high risk.
-    pub fn risk_level(&self) -> RiskLevel {
-        let fan = self.fan_in.unwrap_or(0);
-        let loc = self.line_count.unwrap_or(0);
-        match (fan, loc) {
-            (f, _) if f >= 20 => RiskLevel::High,
-            (f, l) if f >= 5 && l >= 100 => RiskLevel::Medium,
-            _ => RiskLevel::Low,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
-}
-
-impl Display for RiskLevel {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            RiskLevel::Low => write!(f, "low"),
-            RiskLevel::Medium => write!(f, "medium"),
-            RiskLevel::High => write!(f, "high"),
-        }
     }
 }

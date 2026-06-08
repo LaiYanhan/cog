@@ -28,18 +28,16 @@ fn run_ok(db: &Path, args: &[&str]) -> String {
 }
 
 fn parse_assertion_id(output: &str) -> String {
+    // New V2 format: "Created <short_id> [kind] on <entity>"
     let raw = output
         .lines()
-        .find_map(|line| line.strip_prefix("- id: "))
-        .expect("assert output should contain assertion id");
-    // format: "short_id (full_uuid)" — extract the full uuid
-    if let Some(start) = raw.find('(')
-        && let Some(end) = raw.find(')')
-        && end > start
-    {
-        return raw[start + 1..end].to_owned();
-    }
-    raw.to_owned()
+        .find_map(|line| line.strip_prefix("Created "))
+        .expect("assert output should contain 'Created <id>'");
+    // Extract the first word (short_id) before the next space
+    raw.split_whitespace()
+        .next()
+        .expect("should have short_id after 'Created '")
+        .to_owned()
 }
 
 #[test]
@@ -91,11 +89,11 @@ fn full_cli_workflow_happy_path() {
     );
 
     let query_output = run_ok(&db, &["query", "auth::login"]);
-    assert!(query_output.contains("entity: auth::login"));
+    assert!(query_output.contains("auth::login"));
     assert!(query_output.contains("none means failure"));
 
     let impact_output = run_ok(&db, &["impact", "auth::login"]);
-    assert!(impact_output.contains("impact_from: auth::login"));
+    assert!(impact_output.contains("Impact for: auth::login"));
 
     let trace_output = run_ok(&db, &["trace", "auth::login"]);
     assert!(trace_output.contains("trace_entity: auth::login"));

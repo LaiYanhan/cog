@@ -2,13 +2,14 @@ use anyhow::{Result, anyhow};
 
 use crate::command::CommandOutput;
 use crate::domain::{AssertionStatus, QueryCard};
-use crate::format::{self, OutputFormat};
+use crate::format::{self, OutputFormat, TextRenderer};
 use crate::repo::Repository;
 
 pub fn execute(
     repo: &dyn Repository,
     entity: &str,
     all: bool,
+    compact: bool,
     output: OutputFormat,
 ) -> Result<CommandOutput> {
     let entity_record = repo
@@ -23,13 +24,19 @@ pub fn execute(
             Ok((assertion, evidences))
         })
         .collect::<Result<Vec<_>>>()?;
-    let related = repo.get_related_entities(&entity_record.id)?;
-    let card = QueryCard {
-        entity: entity_record,
-        assertions: assertions_with_evidence,
-        related,
-    };
-    Ok(CommandOutput::success(format::emit_report(&card, output)))
+
+    if compact {
+        let text = TextRenderer::query_compact(&entity_record, &assertions_with_evidence);
+        Ok(CommandOutput::success(text))
+    } else {
+        let related = repo.get_related_entities(&entity_record.id)?;
+        let card = QueryCard {
+            entity: entity_record,
+            assertions: assertions_with_evidence,
+            related,
+        };
+        Ok(CommandOutput::success(format::emit_report(&card, output)))
+    }
 }
 
 #[cfg(test)]
@@ -58,9 +65,9 @@ mod tests {
             None,
         )?;
 
-        let output = execute(&store, "auth::login", false, OutputFormat::Text)?;
+        let output = execute(&store, "auth::login", false, false, OutputFormat::Text)?;
         assert_eq!(output.exit_code, 0);
-        assert!(output.text.contains("entity: auth::login"));
+        assert!(output.text.contains("auth::login"));
         assert!(output.text.contains("returns option token"));
         assert!(output.text.contains("AuthToken"));
         Ok(())

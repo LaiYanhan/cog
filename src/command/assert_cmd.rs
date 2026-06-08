@@ -47,7 +47,16 @@ pub fn execute(
         &format!("entity={entity} kind={kind} claim={claim}"),
     )?;
 
-    let msg = format::assertion_created(&assertion, &entity_record, resolved_depends_on.as_deref());
+    // Gather existing assertions with evidence for the V2 output format
+    let raw_assertions = repo.get_assertions_for_entity(&entity_record.id)?;
+    let mut existing: Vec<(crate::domain::Assertion, Vec<crate::domain::Evidence>)> = Vec::new();
+    for a in &raw_assertions {
+        let ev = repo.get_evidence_for_assertion(&a.id)?;
+        existing.push((a.clone(), ev));
+    }
+    let same_kind_count = existing.iter().filter(|(a, _)| a.kind == kind).count();
+
+    let msg = format::assertion_created(&assertion, &entity_record, &existing, same_kind_count);
     Ok(CommandOutput::success(format::emit_report(
         &StatusMessage { message: msg },
         output,
@@ -79,7 +88,11 @@ mod tests {
         )?;
 
         assert_eq!(output.exit_code, 0);
-        assert!(output.text.contains("assertion created"));
+        assert!(
+            output.text.contains("Created"),
+            "expected 'Created' in: {}",
+            output.text
+        );
 
         let entity = store
             .get_entity_by_name("auth::login")?

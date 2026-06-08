@@ -32,10 +32,16 @@ pub fn short_id(id: &str) -> &str {
 pub fn assertion_created(
     assertion: &Assertion,
     entity: &Entity,
-    depends_on: Option<&str>,
+    existing_assertions: &[(Assertion, Vec<Evidence>)],
+    same_kind_count: usize,
 ) -> String {
-    TextRenderer::assertion_created(assertion, entity, depends_on)
+    TextRenderer::assertion_created(assertion, entity, existing_assertions, same_kind_count)
 }
-pub fn dependency_recorded(from: &Entity, to: &Entity, kind: EntityRelationKind) -> String {
-    TextRenderer::dependency_recorded(from, to, kind)
+pub fn dependency_report(
+    from: &Entity,
+    to: &Entity,
+    kind: EntityRelationKind,
+    related: &[crate::domain::RelatedEntity],
+) -> String {
+    TextRenderer::dependency_report(from, to, kind, related)
 }

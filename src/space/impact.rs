@@ -60,7 +60,7 @@ impl ImpactEngine {
         let mut all_entity_ids = vec![entity.id.clone()];
         all_entity_ids.extend(downstream_ids);
 
-        let affected_assertions = repo
+        let affected_assertions: Vec<crate::domain::Assertion> = repo
             .get_assertions_for_entities(&all_entity_ids)?
             .into_iter()
             .filter(|a| a.status == AssertionStatus::Active)
@@ -71,11 +71,38 @@ impl ImpactEngine {
             .ok()
             .map(|semantic| semantic.assess_risk(&entity.id, &structure));
 
+        // Compute per-entity assertion counts
+        let downstream_assertion_counts: Vec<usize> = downstream_entities
+            .iter()
+            .map(|e| {
+                affected_assertions
+                    .iter()
+                    .filter(|a| a.entity_id == e.id)
+                    .count()
+            })
+            .collect();
+
+        // Compute downstream coverage metrics
+        let downstream_count = downstream_entities.len();
+        let (downstream_coverage, blind_downstream) = if downstream_count > 0 {
+            let covered_count = downstream_assertion_counts
+                .iter()
+                .filter(|&&c| c > 0)
+                .count();
+            let blind_count = downstream_count.saturating_sub(covered_count);
+            let coverage = (covered_count as f64) / (downstream_count as f64);
+            (Some(coverage), Some(blind_count))
+        } else {
+            (None, None)
+        };
         Ok(ImpactCard {
             entity,
             downstream_entities,
             affected_assertions,
+            downstream_assertion_counts,
             risk_assessment,
+            downstream_coverage,
+            blind_downstream,
         })
     }
 }

@@ -12,5 +12,9 @@ pub struct RiskAssessment {
     pub downstream_count: usize,
     pub active_assertions: usize,
     pub fragile_assertions: usize,
+    #[serde(default)]
+    pub downstream_coverage: f64,
+    #[serde(default)]
+    pub unmodeled_downstream: usize,
     pub summary: String,
 }

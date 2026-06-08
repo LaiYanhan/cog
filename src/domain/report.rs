@@ -22,6 +22,8 @@ pub struct ModelStats {
     pub retracted_assertions: u64,
     pub evidences: u64,
     pub corrections: u64,
+    #[serde(default)]
+    pub covered_entities: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
@@ -91,14 +93,19 @@ pub enum CascadeReason {
     MarkedUncertain,
     GroundWeakened,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ImpactCard {
     pub entity: Entity,
     pub downstream_entities: Vec<Entity>,
     pub affected_assertions: Vec<Assertion>,
+    /// Assertion count per downstream entity (same order as downstream_entities).
+    pub downstream_assertion_counts: Vec<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub risk_assessment: Option<crate::space::risk::RiskAssessment>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub downstream_coverage: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub blind_downstream: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -131,17 +138,34 @@ pub struct QueryCard {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityIndex {
     pub entities: Vec<(Entity, usize)>,
+    #[serde(default)]
+    pub summary_mode: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub coverage_summary: Option<IndexCoverage>,
 }
 
-/// Result of a `cog init` command.
+/// Result of a `cog sync` command — the sole codebase-scanning command.
+///
+/// Replaces the old `cog init` (one-shot) and `cog sync` (incremental) with a
+/// single idempotent command that always runs a full scan, creating entities and
+/// relations, and removing stale Scan-origin entities (unless they have assertions).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InitReport {
+pub struct SyncReport {
     pub files_scanned: usize,
     pub files_by_language: HashMap<String, usize>,
     pub entities_created: usize,
+    pub entities_removed: usize,
     pub relations_created: usize,
     pub entity_counts_by_kind: HashMap<String, usize>,
+    /// Stale entities that were removed.
+    pub stale_entities: Vec<String>,
+    /// Stale entities that were NOT removed (they have assertions).
+    pub stale_skipped: Vec<String>,
     pub dry_run: bool,
+    /// Whether the scan detected any drift (new, stale, or skipped entities).
+    pub has_drift: bool,
+    pub after_entities: usize,
+    pub after_assertions: usize,
 }
 
 /// Result of a `cog verify` command.
@@ -152,6 +176,86 @@ pub struct VerificationReport {
     pub cleaned_count: usize,
     pub scan_issues: Vec<String>,
     pub success: bool,
+}
+
+/// Suggestion from the scout subcommand.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScoutSuggestion {
+    pub entity_name: String,
+    pub entity_kind: String,
+    pub reason: String,
+    pub action: ScoutAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ScoutAction {
+    Read,
+    Assert,
+    Verify,
+}
+
+/// A currently active (Open/Evaluated) experiment detected on disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveExperiment {
+    pub short_id: String,
+    pub description: String,
+    /// "draft" or "evaluated"
+    pub status: String,
+    /// File modification time of the experiment JSON — used as a proxy for
+    /// when the experiment was last evaluated. `None` if unavailable.
+    pub mtime: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Result of a `cog next` command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NextReport {
+    pub state: String,
+    pub active_experiments: Vec<ActiveExperiment>,
+    pub model: NextModelSummary,
+    pub covered: u64,
+    pub coverage_pct: f64,
+    pub suggestions: Vec<NextSuggestion>,
+    pub stagnation_warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NextModelSummary {
+    pub entities: u64,
+    pub assertions: u64,
+    pub active: u64,
+    pub retracted: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NextSuggestion {
+    pub kind: String,
+    pub description: String,
+    pub next_command: String,
+}
+
+/// Coverage breakdown for the index summary view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexCoverage {
+    pub covered: usize,
+    pub total: usize,
+    pub pct: f64,
+    pub modules: Vec<ModuleCoverage>,
+    pub top_uncovered: Vec<TopUncovered>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleCoverage {
+    pub path: String,
+    pub covered: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopUncovered {
+    pub entity_name: String,
+    pub entity_kind: String,
+    pub assertions: usize,
+    pub dependents: usize,
 }
 
 /// Lightweight status message for commands with simple output (assert, depend, etc.).

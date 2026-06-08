@@ -42,6 +42,17 @@ impl SqliteRepository {
             )
             .context("failed to compute stats")?;
 
+        // Compute covered entities: entities with at least one assertion
+        let covered: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(DISTINCT e.id) FROM entities e \
+                 INNER JOIN assertions a ON a.entity_id = e.id",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
         Ok(ModelStats {
             entities: entities as u64,
             assertions: assertions as u64,
@@ -50,6 +61,7 @@ impl SqliteRepository {
             retracted_assertions: retracted as u64,
             evidences: evidences as u64,
             corrections: corrections as u64,
+            covered_entities: covered as u64,
         })
     }
 
