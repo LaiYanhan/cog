@@ -25,6 +25,8 @@ pub enum ExperimentAction {
         #[arg(long)]
         depends_on: Option<String>,
     },
+    /// Start a new experiment on an entity. For complex scenarios
+    /// requiring multiple hypotheses — use `try` for quick one-liner.
     Start {
         /// Entity to focus the experiment on
         entity: String,
