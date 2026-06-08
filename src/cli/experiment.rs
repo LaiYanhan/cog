@@ -5,6 +5,26 @@ use crate::domain::AssertionKind;
 #[derive(Debug, Subcommand)]
 pub enum ExperimentAction {
     /// Start a new experiment focused on an entity
+    /// Quick sandbox: start + hypothesize + evaluate in one command
+    Try {
+        /// Entity to focus the experiment on
+        entity: String,
+        /// Kind of hypothetical assertion
+        #[arg(long)]
+        kind: AssertionKind,
+        /// The claim
+        #[arg(long)]
+        claim: String,
+        /// Grounds for the claim
+        #[arg(long)]
+        grounds: String,
+        /// Optional experiment description (default: "<entity>: <claim>")
+        #[arg(long)]
+        desc: Option<String>,
+        /// ID of another assertion this hypothesis depends on
+        #[arg(long)]
+        depends_on: Option<String>,
+    },
     Start {
         /// Entity to focus the experiment on
         entity: String,

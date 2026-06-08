@@ -8,7 +8,11 @@ pub struct ExperimentReport {
     pub ops_count: usize,
     pub risk_score: f64,
     pub affected_count: usize,
+    /// Number of assertions that would become Uncertain via TMS cascade.
+    pub cascade_count: usize,
     pub contradictions: Vec<Contradiction>,
+    /// Subgraph entities that have no active assertions.
+    pub blind_entities: Vec<String>,
     pub boundary_entities: Vec<String>,
 }
 

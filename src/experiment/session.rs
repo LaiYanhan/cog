@@ -104,11 +104,11 @@ impl Experiment {
     /// Evaluate all hypothetical ops: simulate cascades and detect contradictions.
     /// Pure computation — does not mutate the experiment.
     pub fn evaluate(&self) -> Result<ExperimentReport> {
-        if self.status != ExperimentStatus::Open {
-            bail!("experiment must be in Open state to evaluate");
+        if self.status != ExperimentStatus::Open && self.status != ExperimentStatus::Evaluated {
+            bail!("experiment must be in Open or Evaluated state to evaluate");
         }
 
-        let mut affected = Vec::new();
+        let mut cascade_affected = Vec::new();
         let mut contradictions = Vec::new();
 
         for op in &self.ops {
@@ -118,7 +118,7 @@ impl Experiment {
                     reason: _reason,
                 } => {
                     if let Some(cascade) = self.semantic.simulate_retract(assertion_id) {
-                        affected.extend(cascade.affected);
+                        cascade_affected.extend(cascade.affected);
                     }
                 }
                 ExperimentOp::Assertion {
@@ -168,6 +168,21 @@ impl Experiment {
             }
         }
 
+        // Detect blind entities: entities in the subgraph with no active assertions
+        let blind_entities: Vec<String> = self
+            .structure
+            .entities
+            .values()
+            .filter(|en| {
+                !self
+                    .semantic
+                    .assertions
+                    .values()
+                    .any(|n| n.assertion.entity_id == en.entity.id && n.assertion.is_active())
+            })
+            .map(|en| en.entity.qualified_name.clone())
+            .collect();
+
         let risk = self
             .semantic
             .assess_risk(&self.entity_focus_id, &self.structure);
@@ -178,16 +193,20 @@ impl Experiment {
             entity_focus: self.entity_focus.clone(),
             ops_count: self.ops.len(),
             risk_score: risk.risk_score,
-            affected_count: affected.len(),
+            affected_count: cascade_affected.len() + contradictions.len(),
+            cascade_count: cascade_affected.len(),
             contradictions,
+            blind_entities,
             boundary_entities: self.boundary_entities.clone(),
         })
     }
 
     /// Mark the experiment as evaluated (call after `evaluate()`).
     pub fn mark_evaluated(&mut self) -> Result<()> {
-        if self.status != ExperimentStatus::Open {
-            bail!("experiment must be in Open state to mark as evaluated");
+        match self.status {
+            ExperimentStatus::Evaluated => return Ok(()),
+            ExperimentStatus::Open => {}
+            _ => bail!("experiment must be in Open state to mark as evaluated"),
         }
         self.status = ExperimentStatus::Evaluated;
         Ok(())
