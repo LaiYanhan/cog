@@ -79,9 +79,24 @@ pub enum Commands {
 
 impl Cli {
     pub fn db_path(&self) -> PathBuf {
-        self.db
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(".cog/cog.db"))
+        if let Some(ref p) = self.db {
+            return p.clone();
+        }
+        // Walk up from CWD to find .cog/cog.db, like git finds .git
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let mut dir = cwd.as_path();
+        loop {
+            let candidate = dir.join(".cog").join("cog.db");
+            if candidate.exists() {
+                return candidate;
+            }
+            match dir.parent() {
+                Some(parent) => dir = parent,
+                None => break,
+            }
+        }
+        // No existing .cog/ found — default to CWD-relative for `cog init`
+        PathBuf::from(".cog/cog.db")
     }
 
     pub fn run(&self, store: &SqliteRepository) -> Result<CommandOutput> {

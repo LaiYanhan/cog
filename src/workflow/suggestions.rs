@@ -95,14 +95,8 @@ fn suggest_for_ready(phase: &WorkflowPhase, repo: &dyn Repository) -> Vec<Sugges
         }
         WorkflowPhase::Assessing => {
             actions.push(SuggestedAction {
-                action: ActionKind::StartChange,
-                description: "Begin a code change now that you've assessed impact.".into(),
-                why: "Impact assessment is most useful just before making a change.".into(),
-                example_command: "cog start-change \"<description>\"".into(),
-            });
-            actions.push(SuggestedAction {
                 action: ActionKind::StartExperiment,
-                description: "Or, run a what-if experiment before committing to a change.".into(),
+                description: "Run a what-if experiment before committing to a change.".into(),
                 why: "Experiments let you test hypotheses without modifying the codebase.".into(),
                 example_command: "cog experiment start <entity>".into(),
             });
@@ -149,7 +143,9 @@ fn suggest_for_ready(phase: &WorkflowPhase, repo: &dyn Repository) -> Vec<Sugges
         }
     }
 
-    // Ready states can always enter change mode
+    // Each phase above recommends only its *unique* next step (e.g. Assessing
+    // suggests experimenting). The universal "you can always start a change"
+    // fallback lives here — no phase needs to duplicate it.
     actions.push(SuggestedAction {
         action: ActionKind::StartChange,
         description: "Begin a code change with impact assessment.".into(),
