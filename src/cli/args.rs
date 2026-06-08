@@ -11,6 +11,9 @@ pub struct QueryArgs {
     /// Show all assertions including retracted
     #[arg(long)]
     pub all: bool,
+    /// Compact mode — one assertion per line, no evidence or relations
+    #[arg(long)]
+    pub compact: bool,
 }
 
 #[derive(Debug, Args)]
@@ -36,6 +39,12 @@ pub struct IndexArgs {
     /// Filter by qualified name prefix (e.g. "auth::")
     #[arg(long)]
     pub prefix: Option<String>,
+    /// Full listing (restore old behavior, bypass summary)
+    #[arg(long)]
+    pub verbose: bool,
+    /// Only show entities without assertions
+    #[arg(long)]
+    pub uncovered: bool,
 }
 
 #[derive(Debug, Args)]
@@ -110,10 +119,10 @@ pub struct DeleteEntityArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct InitArgs {
+pub struct SyncArgs {
     /// Path to scan (defaults to current directory)
     pub path: Option<PathBuf>,
-    /// Only show what would be created, don't write to database
+    /// Only show what would be changed, don't write to database
     #[arg(long)]
     pub dry_run: bool,
     /// Maximum directory traversal depth
@@ -126,15 +135,3 @@ pub struct InitArgs {
 
 #[derive(Debug, Args)]
 pub struct NextArgs;
-
-#[derive(Debug, Args)]
-pub struct StartChangeArgs {
-    /// Description of the change
-    pub description: String,
-}
-
-#[derive(Debug, Args)]
-pub struct FinishChangeArgs;
-
-#[derive(Debug, Args)]
-pub struct AbortChangeArgs;

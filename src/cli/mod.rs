@@ -13,9 +13,9 @@ pub use experiment::ExperimentAction;
 
 use crate::backup::BackupManager;
 use crate::command::{self, CommandOutput};
-use crate::repo::SqliteRepository;
+use crate::format;
+use crate::repo::{Repository, SqliteRepository};
 use crate::workflow::{WorkflowState, suggest_actions};
-
 #[derive(Debug, Parser)]
 #[command(name = "cog", about = "Cognitive model for coding agents", version)]
 pub struct Cli {
@@ -65,16 +65,10 @@ pub enum Commands {
         #[command(subcommand)]
         action: BackupAction,
     },
-    /// Scan a codebase and populate the model with structural entities
-    Init(InitArgs),
     /// Show suggested next actions based on current workflow state
     Next(NextArgs),
-    /// Begin tracking a code change
-    StartChange(StartChangeArgs),
-    /// Finish the current change cycle
-    FinishChange(FinishChangeArgs),
-    /// Abort the current change cycle
-    AbortChange(AbortChangeArgs),
+    /// Scan a codebase and sync the model (idempotent — safe to re-run)
+    Sync(SyncArgs),
 }
 
 impl Cli {
@@ -111,18 +105,24 @@ impl Cli {
 
         let result = match &self.command {
             Commands::Query(args) => {
-                let out = command::query::execute(store, &args.entity, args.all, self.output)?;
+                let out = command::query::execute(
+                    store,
+                    &args.entity,
+                    args.all,
+                    args.compact,
+                    self.output,
+                )?;
                 wf.transition_explore();
                 Ok(out)
             }
             Commands::Impact(args) => {
                 let out = command::impact::execute(store, &args.entity, self.output)?;
-                wf.transition_assess();
+                wf.transition_browse();
                 Ok(out)
             }
             Commands::Trace(args) => {
                 let out = command::trace::execute(store, &args.entity, self.output)?;
-                wf.transition_assess();
+                wf.transition_browse();
                 Ok(out)
             }
             Commands::Index(args) => {
@@ -131,6 +131,8 @@ impl Cli {
                     args.kind,
                     args.origin,
                     args.prefix.as_deref(),
+                    args.verbose,
+                    args.uncovered,
                     self.output,
                 )?;
                 wf.transition_browse();
@@ -206,6 +208,25 @@ impl Cli {
             Commands::Experiment { action } => {
                 use ExperimentAction::*;
                 match action {
+                    Try {
+                        entity,
+                        kind,
+                        claim,
+                        grounds,
+                        desc,
+                        depends_on,
+                    } => command::experiment_cmd::try_experiment(
+                        store,
+                        &command::experiment_cmd::TryArgs {
+                            entity: entity.clone(),
+                            kind: *kind,
+                            claim: claim.clone(),
+                            grounds: grounds.clone(),
+                            desc: desc.clone(),
+                            depends_on: depends_on.clone(),
+                            cog_dir: &cog_dir,
+                        },
+                    ),
                     Start {
                         entity,
                         description,
@@ -251,7 +272,7 @@ impl Cli {
                     Drop { name } => command::backup_cmd::drop(&mgr, name),
                 }
             }
-            Commands::Init(args) => {
+            Commands::Sync(args) => {
                 let scan_path = args
                     .path
                     .as_deref()
@@ -261,7 +282,7 @@ impl Cli {
                     .lang
                     .as_ref()
                     .map(|s| s.split(',').map(|l| l.trim().to_string()).collect());
-                let out = command::init_cmd::execute(
+                let out = command::sync_cmd::execute(
                     store,
                     &scan_path,
                     args.dry_run,
@@ -269,47 +290,62 @@ impl Cli {
                     lang_list,
                     self.output,
                 )?;
-                if out.exit_code == 0 {
-                    wf.transition_init().ok(); // may fail if already init'd
+                if out.exit_code == 0 && !args.dry_run {
+                    if matches!(wf, WorkflowState::Uninit) {
+                        wf.transition_init().ok();
+                    } else {
+                        wf.transition_sync(out.has_drift);
+                    }
                 }
                 Ok(out)
             }
             Commands::Next(_) => {
-                let actions = suggest_actions(&wf, store);
-                let mut text = format!("State: {}\n\nSuggested actions:\n", wf.describe());
-                for (i, a) in actions.iter().enumerate() {
-                    text.push_str(&format!(
-                        "  {}. [{}] {}\n     Why: {}\n     Example: {}\n",
-                        i + 1,
-                        action_kind_label(&a.action),
-                        a.description,
-                        a.why,
-                        a.example_command,
-                    ));
+                let active_experiments = detect_active_experiments(&cog_dir);
+                let actions = suggest_actions(&wf, store, &active_experiments);
+                let stats = store.stats().unwrap_or_default();
+
+                // Separate stagnation SyncModel from regular suggestions
+                let mut suggestions = Vec::new();
+                let mut stagnation_warning = None;
+                for a in &actions {
+                    if matches!(a.action, crate::workflow::ActionKind::SyncModel) {
+                        stagnation_warning = Some(format!(
+                            "WARNING: {}\n  Next: {}",
+                            a.description, a.example_command
+                        ));
+                    } else {
+                        suggestions.push(crate::domain::NextSuggestion {
+                            kind: action_kind_label(&a.action).to_string(),
+                            description: a.description.clone(),
+                            next_command: a.example_command.clone(),
+                        });
+                    }
                 }
-                Ok(CommandOutput::success(text))
-            }
-            Commands::StartChange(args) => {
-                wf.transition_start_change(args.description.clone(), Vec::new())?;
-                let out = CommandOutput::success(format!(
-                    "started change: {}\nState: {}",
-                    args.description,
-                    wf.describe()
-                ));
-                Ok(out)
-            }
-            Commands::FinishChange(_) => {
-                wf.transition_finish_change()?;
-                Ok(CommandOutput::success(format!(
-                    "change finished.\nState: {}",
-                    wf.describe()
-                )))
-            }
-            Commands::AbortChange(_) => {
-                wf.transition_abort_change()?;
-                Ok(CommandOutput::success(format!(
-                    "change aborted.\nState: {}",
-                    wf.describe()
+
+                let coverage_pct = if stats.entities > 0 {
+                    (stats.covered_entities as f64) / (stats.entities as f64) * 100.0
+                } else {
+                    0.0
+                };
+
+                let report = crate::domain::NextReport {
+                    state: wf.describe(),
+                    active_experiments,
+                    model: crate::domain::NextModelSummary {
+                        entities: stats.entities,
+                        assertions: stats.assertions,
+                        active: stats.active_assertions,
+                        retracted: stats.retracted_assertions,
+                    },
+                    covered: stats.covered_entities,
+                    coverage_pct,
+                    suggestions,
+                    stagnation_warning,
+                };
+
+                Ok(CommandOutput::success(format::emit_report(
+                    &report,
+                    self.output,
                 )))
             }
         };
@@ -323,18 +359,100 @@ impl Cli {
 fn action_kind_label(kind: &crate::workflow::ActionKind) -> &'static str {
     match kind {
         crate::workflow::ActionKind::InitProject => "init",
-        crate::workflow::ActionKind::RecordMissingContracts => "record_contracts",
-        crate::workflow::ActionKind::ReviewUncertainAssertions => "review_uncertain",
-        crate::workflow::ActionKind::StartRecording => "start_recording",
-        crate::workflow::ActionKind::AssessImpact => "assess_impact",
-        crate::workflow::ActionKind::StartChange => "start_change",
-        crate::workflow::ActionKind::VerifyChanges => "verify",
-        crate::workflow::ActionKind::RecordFix => "record_fix",
-        crate::workflow::ActionKind::FinishChange => "finish_change",
-        crate::workflow::ActionKind::AbortChange => "abort_change",
+        crate::workflow::ActionKind::RecordMissingContracts => "model",
+        crate::workflow::ActionKind::ReviewUncertainAssertions => "review",
+        crate::workflow::ActionKind::StartRecording => "model",
+        crate::workflow::ActionKind::AssessImpact => "assess",
+        crate::workflow::ActionKind::RecordFix => "model",
         crate::workflow::ActionKind::TraceRootCause => "trace",
         crate::workflow::ActionKind::VerifyConsistency => "verify",
-        crate::workflow::ActionKind::StartExperiment => "experiment",
-        crate::workflow::ActionKind::StartExperimentDuringChange => "experiment",
+        crate::workflow::ActionKind::StartExperiment => "descent",
+        crate::workflow::ActionKind::SyncModel => "drift",
+        crate::workflow::ActionKind::ImplementNow => "descent",
+        crate::workflow::ActionKind::CommitExperiment => "descent",
     }
+}
+
+/// Detect all active (Open/Evaluated) experiments from disk.
+/// Returns a list of `ActiveExperiment` sorted by modification time (most recent first).
+fn detect_active_experiments(cog_dir: &std::path::Path) -> Vec<crate::domain::ActiveExperiment> {
+    let exp_dir = cog_dir.join("experiments");
+    if !exp_dir.exists() {
+        return Vec::new();
+    }
+    let entries = match std::fs::read_dir(&exp_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut results: Vec<crate::domain::ActiveExperiment> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+
+        // Quick parse: look for "status" field
+        let Some(status_pos) = content.find("\"status\":") else {
+            continue;
+        };
+        let rest = &content[status_pos + 9..];
+        let trimmed = rest.trim_start();
+
+        let status_label = if trimmed.starts_with("\"Evaluated\"") {
+            "evaluated"
+        } else if trimmed.starts_with("\"Open\"") {
+            "draft"
+        } else {
+            continue; // Committed/Discarded — not active
+        };
+
+        let short_id = content
+            .find("\"id\":")
+            .and_then(|i| {
+                let r = &content[i + 5..];
+                let start = r.find('"')? + 1;
+                let end = r[start..].find('"')?;
+                Some(&r[start..start + end])
+            })
+            .map(|id| if id.len() >= 8 { &id[..8] } else { id })
+            .unwrap_or("unknown")
+            .to_string();
+
+        let description = content
+            .find("\"description\":")
+            .and_then(|i| {
+                let r = &content[i + 15..];
+                let start = r.find('"')? + 1;
+                let end = r[start..].find('"')?;
+                Some(&r[start..start + end])
+            })
+            .unwrap_or("")
+            .to_string();
+
+        // Use file mtime as proxy for evaluation time
+        let mtime = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| {
+                chrono::DateTime::from_timestamp(
+                    t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64,
+                    0,
+                )
+            });
+
+        results.push(crate::domain::ActiveExperiment {
+            short_id,
+            description,
+            status: status_label.to_string(),
+            mtime,
+        });
+    }
+
+    // Sort by mtime descending (most recent first)
+    results.sort_by_key(|b| std::cmp::Reverse(b.mtime));
+    results
 }
