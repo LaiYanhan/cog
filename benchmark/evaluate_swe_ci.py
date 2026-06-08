@@ -189,12 +189,13 @@ def analyze_trajectories(task_dir: Path) -> dict:
                 continue
             cog_cmds.append(cmd)
             # Classify by subcommand
-            for subcmd in ["init", "query", "assert", "retract", "verify", "stats",
+            for subcmd in ["sync", "query", "assert", "retract", "verify", "stats",
                            "index", "impact", "depend", "next", "experiment"]:
                 if f"cog {subcmd}" in cmd or f"cog experiment {subcmd}" in cmd:
                     key = subcmd if subcmd != "experiment" else f"exp_{subcmd}"
                     # More specific experiment subcommands
-                    if "experiment start" in cmd: key = "exp_start"
+                    if "experiment try" in cmd: key = "exp_try"
+                    elif "experiment start" in cmd: key = "exp_start"
                     elif "experiment hypothesize" in cmd: key = "exp_hypothesize"
                     elif "experiment evaluate" in cmd: key = "exp_evaluate"
                     elif "experiment commit" in cmd: key = "exp_commit"
@@ -255,9 +256,36 @@ def analyze_trajectories(task_dir: Path) -> dict:
     return {"has_traj": True, "epochs": epochs}
 
 
+import re
+
+
+def try_detect_max_epoch(exp_dir: Path) -> int | None:
+    """Try to detect max_epoch from SWE-CI config files matching the experiment name."""
+    exp_name = exp_dir.name
+
+    for parent in exp_dir.parents:
+        config_files = sorted(parent.glob("config*.toml"))
+        if not config_files:
+            continue
+        for config_path in config_files:
+            try:
+                text = config_path.read_text(encoding="utf-8")
+                name_match = re.search(r'experiment_name\s*=\s*"([^"]+)"', text)
+                if not name_match or name_match.group(1) != exp_name:
+                    continue
+                epoch_match = re.search(r'max_epoch\s*=\s*(\d+)', text)
+                if epoch_match:
+                    return int(epoch_match.group(1))
+            except Exception:
+                continue
+        # Only check one level that has config files
+        break
+
+    return None
+
 # ── SWE-CI metrics ──────────────────────────────────────────────────
 
-def compute_metrics(it: dict, max_epoch: int = 20) -> dict:
+def compute_metrics(it: dict, max_epoch: int | None = None) -> dict:
     """Compute metrics matching official SWE-CI summarize.py metrics_func."""
     init_passed = it["init_passed"]
     total_gap = it["init_gap"]
@@ -270,14 +298,17 @@ def compute_metrics(it: dict, max_epoch: int = 20) -> dict:
     if not evo:
         return {"EvoScore": 0.0, "Resolved": 0.0, "ZeroReg": 1.0, "ZRR": 0.0}
 
-    # Build evo_seq of passed counts, padded/truncated to max_epoch
+    # target_len: pad/truncate to max_epoch if specified, else use actual length
+    target_len = max_epoch if max_epoch is not None else len(evo)
+
+    # Build evo_seq of passed counts, padded/truncated to target_len
     evo_seq = [min(max(0, e["passed"]), target) for e in evo]
     actual_len = len(evo_seq)
-    if actual_len < max_epoch:
+    if actual_len < target_len:
         fill_value = evo_seq[-1] if actual_len > 0 else init_passed
-        evo_seq = evo_seq + [fill_value] * (max_epoch - actual_len)
+        evo_seq = evo_seq + [fill_value] * (target_len - actual_len)
     else:
-        evo_seq = evo_seq[:max_epoch]
+        evo_seq = evo_seq[:target_len]
 
     # Relative changes
     rela_changes = []
@@ -289,7 +320,7 @@ def compute_metrics(it: dict, max_epoch: int = 20) -> dict:
         else:
             change = 0
         rela_changes.append(change)
-    evo_score = sum(rela_changes) / max_epoch
+    evo_score = sum(rela_changes) / target_len
 
     # Resolved: any point in [init_pass] + evo_seq reached target
     seq_with_init = [init_passed] + evo_seq
@@ -312,7 +343,7 @@ def compute_metrics(it: dict, max_epoch: int = 20) -> dict:
 
 # ── Single experiment analysis ──────────────────────────────────────
 
-def analyze_experiment(exp_dir: Path, max_epoch: int = 20) -> dict:
+def analyze_experiment(exp_dir: Path, max_epoch: int | None = None) -> dict:
     exp_dir = exp_dir.resolve()
     if not exp_dir.exists():
         print(f"Error: {exp_dir} does not exist", file=sys.stderr)
@@ -326,6 +357,10 @@ def analyze_experiment(exp_dir: Path, max_epoch: int = 20) -> dict:
     if not tasks:
         print(f"No task directories found in {exp_dir}", file=sys.stderr)
         sys.exit(1)
+
+    # Auto-detect max_epoch from config if not explicitly specified
+    if max_epoch is None:
+        max_epoch = try_detect_max_epoch(exp_dir)
 
     results = {}
     for task_id, task_dir in tasks:
@@ -588,7 +623,7 @@ def analyze_quality(results: dict) -> dict:
 
             # ── Bad signals ──
             if q["command_diversity"] <= 1:
-                q["bad_signals"].append("only cog init, no query/assert/impact")
+                q["bad_signals"].append("only cog sync, no query/assert/impact")
             elif "query" not in all_subcmds and "assert" not in all_subcmds:
                 q["bad_signals"].append("no query or assert calls")
             if not q["assertion_growth"] and len(growth) > 1 and total_assertions > 0:
@@ -601,6 +636,85 @@ def analyze_quality(results: dict) -> dict:
         quality[task_id] = q
     return quality
 
+def analyze_subcommand_distribution(results: dict) -> dict:
+    """Aggregate cog subcommand calls across all tasks and epochs.
+
+    Returns a dict with per-subcommand totals and percentage of all cog calls.
+    """
+    totals: dict[str, int] = defaultdict(int)
+    grand_total = 0
+
+    for task_id, r in results.items():
+        traj = r.get("trajectories", {})
+        if not traj.get("has_traj"):
+            continue
+        for ep in traj["epochs"].values():
+            summary = ep.get("cog_summary", {})
+            for subcmd, count in summary.items():
+                totals[subcmd] += count
+                grand_total += count
+
+    # Sort by count descending
+    sorted_cmds = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+    distribution = {
+        subcmd: {"count": count, "pct": round(count / grand_total * 100, 1) if grand_total > 0 else 0.0}
+        for subcmd, count in sorted_cmds
+    }
+
+    # Also provide a human-readable label for internal keys
+    _LABELS = {
+        "sync": "sync",
+        "query": "query",
+        "assert": "assert",
+        "retract": "retract",
+        "verify": "verify",
+        "stats": "stats",
+        "index": "index",
+        "impact": "impact",
+        "depend": "depend",
+        "next": "next",
+        "exp_try": "experiment try",
+        "exp_start": "experiment start",
+        "exp_hypothesize": "experiment hypothesize",
+        "exp_evaluate": "experiment evaluate",
+        "exp_commit": "experiment commit",
+        "exp_discard": "experiment discard",
+        "other": "other",
+    }
+
+    return {"grand_total": grand_total, "distribution": distribution, "labels": _LABELS}
+
+
+def print_subcommand_distribution(results: dict):
+    """Print cog subcommand distribution as a sorted bar chart table."""
+    dist = analyze_subcommand_distribution(results)
+    console = Console()
+
+    if dist["grand_total"] == 0:
+        console.print("\n  No cog CLI calls found.")
+        return
+
+    console.print(f"\n  Cog Subcommand Distribution ({dist['grand_total']} total calls)", style="bold")
+    console.print("─" * 80)
+
+    table = Table(show_header=True, header_style="bold", show_lines=False,
+                  border_style="dim", padding=(0, 1), expand=False)
+    table.add_column("Subcommand", style="cyan", min_width=20)
+    table.add_column("Calls", justify="right", min_width=7)
+    table.add_column("%", justify="right", min_width=6)
+    table.add_column("", min_width=40)  # bar
+
+    labels = dist["labels"]
+    for subcmd, info in dist["distribution"].items():
+        label = labels.get(subcmd, subcmd)
+        pct = info["pct"]
+        # Bar: each full block = 2%, capped at 50 chars
+        bar_len = min(int(pct / 2), 50)
+        bar = "█" * bar_len
+        table.add_row(label, str(info["count"]), f"{pct:.1f}", bar)
+
+    console.print(table)
+    return dist
 
 def print_quality_report(results: dict):
     """Print cog quality metrics table and signal analysis."""
@@ -782,8 +896,8 @@ def main():
     parser.add_argument("dirs", nargs="+", type=Path, help="Experiment directory(s)")
     parser.add_argument("--compare", action="store_true",
                         help="A/B comparison: first dir=baseline, second dir=cog")
-    parser.add_argument("--max-epoch", type=int, default=20,
-                        help="Max evolution epochs (must match config.toml, default: 20)")
+    parser.add_argument("--max-epoch", type=int, default=None,
+                        help="Max evolution epochs (auto-detected from config.toml; fallback: actual epoch count)")
     parser.add_argument("--json", action="store_true", help="Also output JSON report")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show per-task detail")
     args = parser.parse_args()
@@ -800,7 +914,7 @@ def main():
         has_any_cog = any(r["cog"].get("has_cog") for r in cog.values())
         if has_any_cog:
             quality = print_quality_report(cog)
-
+            print_subcommand_distribution(cog)
         if args.verbose:
             print_cog_detail(cog)
             print_regressions(baseline)
@@ -820,6 +934,7 @@ def main():
             has_any_cog = any(r["cog"].get("has_cog") for r in results.values())
             if has_any_cog:
                 quality = print_quality_report(results)
+                print_subcommand_distribution(results)
 
             if args.verbose:
                 print_cog_detail(results)
