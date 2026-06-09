@@ -6,6 +6,7 @@ pub mod experiment_cmd;
 pub mod export;
 pub mod impact;
 pub mod index_cmd;
+pub mod next_cmd;
 pub mod query;
 pub mod retract;
 pub mod stats;

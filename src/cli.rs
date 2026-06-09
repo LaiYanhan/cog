@@ -13,9 +13,8 @@ pub use experiment::ExperimentAction;
 
 use crate::backup::BackupManager;
 use crate::command::{self, CommandOutput};
-use crate::format;
-use crate::repo::{Repository, SqliteRepository};
-use crate::workflow::{WorkflowState, suggest_actions};
+use crate::repo::SqliteRepository;
+use crate::workflow::WorkflowState;
 #[derive(Debug, Parser)]
 #[command(name = "cog", about = "Cognitive model for coding agents", version)]
 pub struct Cli {
@@ -318,160 +317,11 @@ impl Cli {
                 }
                 Ok(out)
             }
-            Commands::Next(_) => {
-                let active_experiments = detect_active_experiments(&cog_dir);
-                let actions = suggest_actions(&wf, store, &active_experiments);
-                let stats = store.stats().unwrap_or_default();
-
-                // Separate stagnation SyncModel from regular suggestions
-                let mut suggestions = Vec::new();
-                let mut stagnation_warning = None;
-                for a in &actions {
-                    if matches!(a.action, crate::workflow::ActionKind::SyncModel) {
-                        stagnation_warning = Some(format!(
-                            "WARNING: {}\n  Next: {}",
-                            a.description, a.example_command
-                        ));
-                    } else {
-                        suggestions.push(crate::domain::NextSuggestion {
-                            kind: action_kind_label(&a.action).to_string(),
-                            description: a.description.clone(),
-                            next_command: a.example_command.clone(),
-                        });
-                    }
-                }
-
-                let coverage_pct = if stats.entities > 0 {
-                    (stats.covered_entities as f64) / (stats.entities as f64) * 100.0
-                } else {
-                    0.0
-                };
-
-                let report = crate::domain::NextReport {
-                    state: wf.describe(),
-                    active_experiments,
-                    model: crate::domain::NextModelSummary {
-                        entities: stats.entities,
-                        assertions: stats.assertions,
-                        active: stats.active_assertions,
-                        retracted: stats.retracted_assertions,
-                    },
-                    covered: stats.covered_entities,
-                    coverage_pct,
-                    suggestions,
-                    stagnation_warning,
-                };
-
-                Ok(CommandOutput::success(format::emit_report(
-                    &report,
-                    self.output,
-                )))
-            }
+            Commands::Next(_) => command::next_cmd::execute(store, &wf, &cog_dir, self.output),
         };
 
         // Persist workflow state after every command
         let _ = wf.save(&cog_dir);
         result
     }
-}
-
-fn action_kind_label(kind: &crate::workflow::ActionKind) -> &'static str {
-    match kind {
-        crate::workflow::ActionKind::InitProject => "init",
-        crate::workflow::ActionKind::RecordMissingContracts => "model",
-        crate::workflow::ActionKind::ReviewUncertainAssertions => "review",
-        crate::workflow::ActionKind::StartRecording => "model",
-        crate::workflow::ActionKind::AssessImpact => "assess",
-        crate::workflow::ActionKind::RecordFix => "model",
-        crate::workflow::ActionKind::TraceRootCause => "trace",
-        crate::workflow::ActionKind::VerifyConsistency => "verify",
-        crate::workflow::ActionKind::StartExperiment => "descent",
-        crate::workflow::ActionKind::SyncModel => "drift",
-        crate::workflow::ActionKind::ImplementNow => "descent",
-        crate::workflow::ActionKind::CommitExperiment => "descent",
-    }
-}
-
-/// Detect all active (Open/Evaluated) experiments from disk.
-/// Returns a list of `ActiveExperiment` sorted by modification time (most recent first).
-fn detect_active_experiments(cog_dir: &std::path::Path) -> Vec<crate::domain::ActiveExperiment> {
-    let exp_dir = cog_dir.join("experiments");
-    if !exp_dir.exists() {
-        return Vec::new();
-    }
-    let entries = match std::fs::read_dir(&exp_dir) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut results: Vec<crate::domain::ActiveExperiment> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "json") {
-            continue;
-        }
-        let Ok(content) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-
-        // Quick parse: look for "status" field
-        let Some(status_pos) = content.find("\"status\":") else {
-            continue;
-        };
-        let rest = &content[status_pos + 9..];
-        let trimmed = rest.trim_start();
-
-        let status_label = if trimmed.starts_with("\"Evaluated\"") {
-            "evaluated"
-        } else if trimmed.starts_with("\"Open\"") {
-            "draft"
-        } else {
-            continue; // Committed/Discarded — not active
-        };
-
-        let short_id = content
-            .find("\"id\":")
-            .and_then(|i| {
-                let r = &content[i + 5..];
-                let start = r.find('"')? + 1;
-                let end = r[start..].find('"')?;
-                Some(&r[start..start + end])
-            })
-            .map(|id| if id.len() >= 8 { &id[..8] } else { id })
-            .unwrap_or("unknown")
-            .to_string();
-
-        let description = content
-            .find("\"description\":")
-            .and_then(|i| {
-                let r = &content[i + 15..];
-                let start = r.find('"')? + 1;
-                let end = r[start..].find('"')?;
-                Some(&r[start..start + end])
-            })
-            .unwrap_or("")
-            .to_string();
-
-        // Use file mtime as proxy for evaluation time
-        let mtime = std::fs::metadata(&path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| {
-                chrono::DateTime::from_timestamp(
-                    t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64,
-                    0,
-                )
-            });
-
-        results.push(crate::domain::ActiveExperiment {
-            short_id,
-            description,
-            status: status_label.to_string(),
-            mtime,
-        });
-    }
-
-    // Sort by mtime descending (most recent first)
-    results.sort_by_key(|b| std::cmp::Reverse(b.mtime));
-    results
 }
