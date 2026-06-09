@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::session::Experiment;
 
@@ -14,8 +14,20 @@ pub fn save(experiment: &Experiment, cog_dir: &Path) -> Result<()> {
 }
 
 pub fn load(id: &str, cog_dir: &Path) -> Result<Experiment> {
-    let path = cog_dir.join("experiments").join(format!("{id}.json"));
-    let json = std::fs::read_to_string(&path)?;
+    let dir = cog_dir.join("experiments");
+    let path = dir.join(format!("{id}.json"));
+    let json = std::fs::read_to_string(&path).with_context(|| {
+        let short_id = if id.len() >= 8 { &id[..8] } else { id };
+        format!(
+            "experiment {short_id} not found at {}\n\
+             Possible causes:\n\
+             1. The experiment was created from a different working directory (different .cog/)\n\
+             2. The experiment ID is incorrect\n\
+             3. The experiment was already committed or discarded\n\
+             Tip: Run `cog experiment list` to see available experiments, or use `--db` to specify the model path.",
+            cog_dir.display()
+        )
+    })?;
     let experiment: Experiment = serde_json::from_str(&json)?;
     Ok(experiment)
 }
