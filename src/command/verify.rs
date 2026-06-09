@@ -320,15 +320,16 @@ mod tests {
     #[test]
     fn scan_detects_stale_entity() -> Result<()> {
         let tmp = tempdir()?;
-        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
+        let db_path = tmp.path().join(".cog").join("cog.db");
+        std::fs::create_dir_all(db_path.parent().unwrap())?;
+        let store = SqliteRepository::open(&db_path)?;
 
         // Create a Rust project with one function and init (populates store with origin=Scan)
         make_rust_project(tmp.path(), &["hello"]);
         sync_cmd::execute(
             &store,
-            &tmp.path().to_path_buf(),
+            &db_path,
             false,
-            None,
             None,
             crate::format::OutputFormat::Text,
         )?;
@@ -385,15 +386,16 @@ mod tests {
     #[test]
     fn scan_clean_removes_stale_entities() -> Result<()> {
         let tmp = tempdir()?;
-        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
+        let db_path = tmp.path().join(".cog").join("cog.db");
+        std::fs::create_dir_all(db_path.parent().unwrap())?;
+        let store = SqliteRepository::open(&db_path)?;
 
         // Create project and sync (populates model with Scan-origin entities)
         make_rust_project(tmp.path(), &["hello"]);
         sync_cmd::execute(
             &store,
-            &tmp.path().to_path_buf(),
+            &db_path,
             false,
-            None,
             None,
             crate::format::OutputFormat::Text,
         )?;
@@ -435,7 +437,9 @@ mod tests {
     #[test]
     fn scoped_scan_does_not_report_out_of_scope_as_unmodeled() -> Result<()> {
         let tmp = tempdir()?;
-        let store = SqliteRepository::open(&tmp.path().join("cog.db"))?;
+        let db_path = tmp.path().join(".cog").join("cog.db");
+        std::fs::create_dir_all(db_path.parent().unwrap())?;
+        let store = SqliteRepository::open(&db_path)?;
 
         // Create two source files with functions in different scopes
         let src = tmp.path().join("src");
@@ -446,9 +450,8 @@ mod tests {
         // Init to populate the model with all scanned entities
         sync_cmd::execute(
             &store,
-            &tmp.path().to_path_buf(),
+            &db_path,
             false,
-            None,
             None,
             crate::format::OutputFormat::Text,
         )?;
