@@ -30,7 +30,7 @@ pub fn walk_and_scan(
         let entry = entry?;
 
         // Skip directories — WalkBuilder handles pruning internally.
-        if !entry.file_type().map_or(false, |ft| ft.is_file()) {
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
             continue;
         }
 

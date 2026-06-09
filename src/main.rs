@@ -19,9 +19,8 @@ fn main() -> Result<()> {
         let path = cli.init_db_path();
         // Create parent directory for init
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create cog directory: {}", parent.display())
-            })?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create cog directory: {}", parent.display()))?;
         }
         path
     } else if let Some(db) = cli.find_existing_db() {
@@ -29,9 +28,8 @@ fn main() -> Result<()> {
     } else if let Some(path) = cli.explicit_db() {
         // Explicit --db but file doesn't exist yet — allow creation (e.g. CI pipelines)
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create cog directory: {}", parent.display())
-            })?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create cog directory: {}", parent.display()))?;
         }
         path.clone()
     } else {

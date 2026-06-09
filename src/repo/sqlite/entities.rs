@@ -268,12 +268,13 @@ impl SqliteRepository {
     /// Used for fuzzy resolution when exact match fails.
     pub(super) fn find_entities_by_suffix(&self, short_name: &str) -> Result<Vec<Entity>> {
         let pattern = format!("%::{}", short_name);
-        let mut stmt = self.conn
+        let mut stmt = self
+            .conn
             .prepare(
                 "SELECT id, qualified_name, kind, origin, metrics_json, created_at \
                  FROM entities WHERE qualified_name LIKE ?1 \
                  OR qualified_name = ?2 \
-                 ORDER BY qualified_name"
+                 ORDER BY qualified_name",
             )
             .context("failed to prepare find_entities_by_suffix statement")?;
         let rows = stmt

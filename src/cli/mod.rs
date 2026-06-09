@@ -105,8 +105,11 @@ impl Cli {
     /// Resolve the DB path: existing DB found by walk-up, or explicit --db.
     /// Does NOT create directories — returns a path that may not exist yet.
     pub fn db_path(&self) -> PathBuf {
-        self.find_existing_db()
-            .unwrap_or_else(|| self.db.clone().unwrap_or_else(|| PathBuf::from(".cog/cog.db")))
+        self.find_existing_db().unwrap_or_else(|| {
+            self.db
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(".cog/cog.db"))
+        })
     }
 
     /// Returns true if this is a `sync --init` command.
@@ -304,13 +307,8 @@ impl Cli {
                     .as_ref()
                     .map(|s| s.split(',').map(|l| l.trim().to_string()).collect());
                 let db = self.db_path();
-                let out = command::sync_cmd::execute(
-                    store,
-                    &db,
-                    args.dry_run,
-                    lang_list,
-                    self.output,
-                )?;
+                let out =
+                    command::sync_cmd::execute(store, &db, args.dry_run, lang_list, self.output)?;
                 if out.exit_code == 0 && !args.dry_run {
                     if matches!(wf, WorkflowState::Uninit) {
                         wf.transition_init().ok();

@@ -31,10 +31,18 @@ impl Repository for SqliteRepository {
             0 => bail!("entity not found: {name}"),
             1 => Ok(candidates.into_iter().next().unwrap()),
             _ => {
-                let names: Vec<&str> = candidates.iter().map(|e| e.qualified_name.as_str()).take(5).collect();
+                let names: Vec<&str> = candidates
+                    .iter()
+                    .map(|e| e.qualified_name.as_str())
+                    .take(5)
+                    .collect();
                 bail!(
                     "entity not found: {name}\n  Did you mean one of these?\n{}",
-                    names.iter().map(|n| format!("    - {n}")).collect::<Vec<_>>().join("\n")
+                    names
+                        .iter()
+                        .map(|n| format!("    - {n}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 )
             }
         }
