@@ -63,9 +63,7 @@ impl StructureSpace {
             max_depth
         };
         let cap = if max_nodes == 0 { 500 } else { max_nodes };
-        let focus = repo
-            .get_entity_by_name(root)?
-            .ok_or_else(|| anyhow::anyhow!("entity not found: {root}"))?;
+        let focus = repo.resolve_entity(root)?;
 
         // BFS: (entity_id, hop_distance)
         let mut visited: HashSet<String> = HashSet::new();
