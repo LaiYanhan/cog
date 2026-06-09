@@ -67,30 +67,56 @@ pub enum Commands {
     },
     /// Show suggested next actions based on current workflow state
     Next(NextArgs),
-    /// Scan a codebase and sync the model (idempotent — safe to re-run)
+    /// Sync the cognitive model with the codebase (idempotent). Use --init to create a new model.
     Sync(SyncArgs),
 }
 
 impl Cli {
-    pub fn db_path(&self) -> PathBuf {
+    /// Find an existing `.cog/cog.db` by walking up from CWD, or from the
+    /// explicit `--db` path. Returns `None` if no existing DB is found.
+    pub fn find_existing_db(&self) -> Option<PathBuf> {
         if let Some(ref p) = self.db {
-            return p.clone();
+            return if p.exists() { Some(p.clone()) } else { None };
         }
-        // Walk up from CWD to find .cog/cog.db, like git finds .git
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let mut dir = cwd.as_path();
         loop {
             let candidate = dir.join(".cog").join("cog.db");
             if candidate.exists() {
-                return candidate;
+                return Some(candidate);
             }
             match dir.parent() {
                 Some(parent) => dir = parent,
                 None => break,
             }
         }
-        // No existing .cog/ found — default to CWD-relative for `cog init`
-        PathBuf::from(".cog/cog.db")
+        None
+    }
+
+    /// DB path for `sync --init`: always at `<CWD>/.cog/cog.db`.
+    pub fn init_db_path(&self) -> PathBuf {
+        if let Some(ref p) = self.db {
+            return p.clone();
+        }
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        cwd.join(".cog").join("cog.db")
+    }
+
+    /// Resolve the DB path: existing DB found by walk-up, or explicit --db.
+    /// Does NOT create directories — returns a path that may not exist yet.
+    pub fn db_path(&self) -> PathBuf {
+        self.find_existing_db()
+            .unwrap_or_else(|| self.db.clone().unwrap_or_else(|| PathBuf::from(".cog/cog.db")))
+    }
+
+    /// Returns true if this is a `sync --init` command.
+    pub fn is_sync_init(&self) -> bool {
+        matches!(&self.command, Commands::Sync(args) if args.init)
+    }
+
+    /// Returns the explicit `--db` path if one was provided.
+    pub fn explicit_db(&self) -> Option<&PathBuf> {
+        self.db.as_ref()
     }
 
     pub fn run(&self, store: &SqliteRepository) -> Result<CommandOutput> {
@@ -273,20 +299,15 @@ impl Cli {
                 }
             }
             Commands::Sync(args) => {
-                let scan_path = args
-                    .path
-                    .as_deref()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| PathBuf::from("."));
                 let lang_list: Option<Vec<String>> = args
                     .lang
                     .as_ref()
                     .map(|s| s.split(',').map(|l| l.trim().to_string()).collect());
+                let db = self.db_path();
                 let out = command::sync_cmd::execute(
                     store,
-                    &scan_path,
+                    &db,
                     args.dry_run,
-                    args.depth,
                     lang_list,
                     self.output,
                 )?;

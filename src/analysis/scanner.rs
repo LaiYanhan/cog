@@ -14,7 +14,6 @@ use super::report::ScanReport;
 #[derive(Debug, Default)]
 pub struct ScanConfig {
     pub root: PathBuf,
-    pub max_depth: Option<usize>,
     pub languages: Option<Vec<Language>>,
 }
 
@@ -39,7 +38,7 @@ impl Scanner {
     /// Repository interaction.
     pub fn scan(&mut self, config: &ScanConfig) -> Result<ScanReport> {
         let mut result = ScanReport::default();
-        super::walker::walk_and_scan(&config.root, 0, config, &mut self.pool, &mut result)?;
+        super::walker::walk_and_scan(&config.root, config, &mut self.pool, &mut result)?;
 
         // Collect detected languages from file counts.
         let mut langs: Vec<Language> = result

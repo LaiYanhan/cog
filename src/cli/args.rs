@@ -120,14 +120,12 @@ pub struct DeleteEntityArgs {
 
 #[derive(Debug, Args)]
 pub struct SyncArgs {
-    /// Path to scan (defaults to current directory)
-    pub path: Option<PathBuf>,
+    /// Initialize a new cognitive model at CWD before syncing
+    #[arg(long)]
+    pub init: bool,
     /// Only show what would be changed, don't write to database
     #[arg(long)]
     pub dry_run: bool,
-    /// Maximum directory traversal depth
-    #[arg(long)]
-    pub depth: Option<usize>,
     /// Only scan these languages (comma-separated, e.g. python,rust)
     #[arg(long)]
     pub lang: Option<String>,

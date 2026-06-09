@@ -10,7 +10,6 @@ mod trait_impl;
 #[cfg(test)]
 mod tests;
 
-use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -25,11 +24,6 @@ pub struct SqliteRepository {
 
 impl SqliteRepository {
     pub fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create db directory: {}", parent.display()))?;
-        }
-
         let conn = Connection::open(path)
             .with_context(|| format!("failed to open sqlite db: {}", path.display()))?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")

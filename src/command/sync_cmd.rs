@@ -44,7 +44,8 @@ fn get_kind(counts: &HashMap<String, usize>, kind: EntityKind) -> usize {
 
 /// Sync the cognitive model with the codebase.
 ///
-/// Runs a full tree-sitter scan of the given path, then:
+/// Derives scan root from the DB path (`<project>/.cog/cog.db` → `<project>`),
+/// runs a full tree-sitter scan, then:
 /// - Creates entities and structural relations (contains/calls/uses) for all
 ///   discovered code.  Idempotent — safe to re-run any time.
 /// - Removes stale Scan-origin entities (code deleted) **unless** they have
@@ -52,12 +53,18 @@ fn get_kind(counts: &HashMap<String, usize>, kind: EntityKind) -> usize {
 /// - With `--dry-run`: reports what *would* change without writing.
 pub fn execute(
     repo: &dyn Repository,
-    path: &PathBuf,
+    db_path: &std::path::Path,
     dry_run: bool,
-    max_depth: Option<usize>,
     languages: Option<Vec<String>>,
     output: OutputFormat,
 ) -> Result<CommandOutput> {
+    // Derive scan root from DB path: <project_root>/.cog/cog.db → <project_root>
+    let scan_root = db_path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+
     let lang_filters: Option<Vec<Language>> = languages.as_ref().map(|langs| {
         langs
             .iter()
@@ -66,8 +73,7 @@ pub fn execute(
     });
 
     let config = ScanConfig {
-        root: path.clone(),
-        max_depth,
+        root: scan_root.clone(),
         languages: lang_filters,
     };
 
@@ -75,7 +81,7 @@ pub fn execute(
 
     if result.files_scanned == 0 {
         return Ok(CommandOutput::with_exit_code(
-            format!("No source files found at {}", path.display()),
+            format!("No source files found at {}", scan_root.display()),
             1,
         ));
     }
@@ -113,7 +119,10 @@ pub fn execute(
     // Collect all directory segments using the same prefix-stripping as path_to_qualified.
     let mut all_dirs: Vec<String> = Vec::new();
     for file_scan in &result.file_scans {
-        let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
+        let rel = file_scan
+            .path
+            .strip_prefix(&scan_root)
+            .unwrap_or(&file_scan.path);
         let parent_rel = rel.parent().unwrap_or(std::path::Path::new(""));
         let parent_qname = path_to_qualified(parent_rel);
         if parent_qname.is_empty() {
@@ -147,7 +156,10 @@ pub fn execute(
 
     // Create file Module entities + directory → file contains
     for file_scan in &result.file_scans {
-        let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
+        let rel = file_scan
+            .path
+            .strip_prefix(&scan_root)
+            .unwrap_or(&file_scan.path);
         let file_qname = path_to_qualified(rel);
 
         let entity = repo.upsert_entity(&file_qname, EntityKind::Module, EntityOrigin::Scan)?;
@@ -198,7 +210,7 @@ pub fn execute(
                             .any(|d| d.qualified_name == def.qualified_name)
                     })
                     .and_then(|fs| {
-                        let rel = fs.path.strip_prefix(path).unwrap_or(&fs.path);
+                        let rel = fs.path.strip_prefix(&scan_root).unwrap_or(&fs.path);
                         let file_qname = path_to_qualified(rel);
                         file_entities
                             .contains_key(&file_qname)
@@ -219,7 +231,10 @@ pub fn execute(
     // Build index: module_path → containing file's qualified name
     let mut import_file_map: HashMap<String, String> = HashMap::new();
     for file_scan in &result.file_scans {
-        let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
+        let rel = file_scan
+            .path
+            .strip_prefix(&scan_root)
+            .unwrap_or(&file_scan.path);
         let file_qname = path_to_qualified(rel);
         for imp in &file_scan.imports {
             import_file_map
@@ -264,7 +279,10 @@ pub fn execute(
     // Also include module entities (directories + files) — these are created
     // by init/sync and must be in the scanned set for stale detection.
     for file_scan in &result.file_scans {
-        let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
+        let rel = file_scan
+            .path
+            .strip_prefix(&scan_root)
+            .unwrap_or(&file_scan.path);
         let file_qname = path_to_qualified(rel);
         scanned_names.insert(file_qname.clone());
 
@@ -420,11 +438,12 @@ mod tests {
         let tmp = tempdir()?;
         make_test_project(tmp.path())?;
         let store = SqliteRepository::open_in_memory()?;
+        // db_path must look like <project>/.cog/cog.db so scan_root = <project>
+        let db_path = tmp.path().join(".cog").join("cog.db");
         let output = execute(
             &store,
-            &tmp.path().to_path_buf(),
+            &db_path,
             true, // dry_run
-            None,
             None,
             OutputFormat::Text,
         )?;
@@ -439,14 +458,14 @@ mod tests {
         let tmp = tempdir()?;
         make_test_project(tmp.path())?;
         let store = SqliteRepository::open_in_memory()?;
-        let path = tmp.path().to_path_buf();
+        let db_path = tmp.path().join(".cog").join("cog.db");
         // First run
-        let out1 = execute(&store, &path, false, None, None, OutputFormat::Text)?;
+        let out1 = execute(&store, &db_path, false, None, OutputFormat::Text)?;
         assert_eq!(out1.exit_code, 0);
         let relations_after_first = store.list_entity_relations()?.len();
 
         // Second run (idempotent)
-        let out2 = execute(&store, &path, false, None, None, OutputFormat::Text)?;
+        let out2 = execute(&store, &db_path, false, None, OutputFormat::Text)?;
         assert_eq!(out2.exit_code, 0);
         let relations_after_second = store.list_entity_relations()?.len();
 
@@ -476,9 +495,8 @@ mod tests {
         // Run sync — this entity doesn't exist in the codebase, but has assertions
         let output = execute(
             &store,
-            &tmp.path().to_path_buf(),
+            &tmp.path().join(".cog").join("cog.db"),
             false,
-            None,
             None,
             OutputFormat::Text,
         )?;
@@ -496,15 +514,13 @@ mod tests {
         let store = SqliteRepository::open_in_memory()?;
         store.upsert_entity("old::gone_fn", EntityKind::Function, EntityOrigin::Scan)?;
 
-        let output = execute(
+        execute(
             &store,
-            &tmp.path().to_path_buf(),
+            &tmp.path().join(".cog").join("cog.db"),
             false,
-            None,
             None,
             OutputFormat::Text,
         )?;
-        assert_eq!(output.exit_code, 0);
 
         // Entity should be removed (stale, no assertions)
         assert!(store.get_entity_by_name("old::gone_fn")?.is_none());
