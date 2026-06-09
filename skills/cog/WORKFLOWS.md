@@ -13,7 +13,7 @@ All auto-generated entities carry origin `Scan` so you can distinguish
 them from manually asserted knowledge.
 
 ```bash
-cog sync .                    # structural skeleton (idempotent, repeatable)
+cog sync --init               # first time: creates .cog/ and scans (idempotent)
 cog next                      # see what the model needs
 cog index                     # coverage summary by module
 ```

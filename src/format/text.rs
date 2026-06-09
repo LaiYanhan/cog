@@ -474,7 +474,7 @@ impl TextRenderer {
             );
             let _ = writeln!(out);
             let _ = writeln!(out, "Would sync entities and relations.");
-            let _ = writeln!(out, "Next: Apply changes: cog sync .");
+            let _ = writeln!(out, "Next: Apply changes: cog sync");
             return out;
         }
 

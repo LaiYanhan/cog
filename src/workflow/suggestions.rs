@@ -47,7 +47,7 @@ pub fn suggest_actions(
         WorkflowState::Uninit => vec![SuggestedAction {
             action: ActionKind::InitProject,
             description: "No cognitive model found. Run sync to scan the codebase.".into(),
-            example_command: "cog sync .".into(),
+            example_command: "cog sync".into(),
         }],
         WorkflowState::Ready { phase } => suggest_for_ready(phase, repo, active_experiments),
     }

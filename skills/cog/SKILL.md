@@ -51,7 +51,7 @@ accepting IDs resolve short IDs automatically.
 
 | Command | Purpose |
 |---------|---------|
-| `cog sync [PATH] [--dry-run] [--depth <N>] [--lang python,rust,...]` | Idempotent full scan with tree-sitter. Creates entities for definitions (functions, classes, structs, methods), directory modules, import relationships, and cleans up stale entities (skipping those with assertions). All auto-generated entities carry origin `Scan`. Replaces the removed `cog init`. |
+| `cog sync [--init] [--dry-run] [--lang python,rust,...]` | Idempotent full scan with tree-sitter. `--init` creates `.cog/` at CWD before syncing. Creates entities for definitions (functions, classes, structs, methods), directory modules, import relationships, and cleans up stale entities (skipping those with assertions). All auto-generated entities carry origin `Scan`. Replaces the removed `cog init`. |
 
 ### Writing
 

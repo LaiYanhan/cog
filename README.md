@@ -13,7 +13,7 @@ The binary is `./target/release/cog`.
 ## Quickstart
 ```sh
 # Auto-scan codebase structure (entities + relations, idempotent)
-cog sync .
+cog sync --init              # first time: creates .cog/ and scans
 
 # Check suggested next actions
 cog next
@@ -36,12 +36,10 @@ cog verify --scan
 
 ```sh
 # Idempotent full scan — creates entities + relations, cleans stale
-cog sync [PATH]
-cog sync .                      # scan current directory
-cog sync src/                   # scan a subtree
-cog sync . --lang python,rust   # filter to specific languages
-cog sync . --depth 3            # limit directory depth
-cog sync . --dry-run            # preview without writing
+cog sync                     # scan (requires existing .cog/)
+cog sync --init              # first time: creates .cog/ then scans
+cog sync --lang python,rust  # filter to specific languages
+cog sync --dry-run           # preview without writing
 
 # Detect drift between model and actual code
 cog verify --scan               # list stale (removed) and unmodeled (new) entities
@@ -120,7 +118,7 @@ State transitions are automatic — `sync` detects code changes, `retract`
 triggers Debugging, `assert` moves from FreshScan/PostChange to Exploring.
 No manual `start-change`/`finish-change`/`abort-change` commands.
 
-Typical cycle: `cog sync .` → `cog next` → make code changes →
+Typical cycle: `cog sync --init` (first time), then `cog sync` → `cog next` → make code changes →
 `cog verify --scan` → `cog assert` (record what you learned).
 
 ### Experiment workflow (hypothesis testing)
@@ -221,7 +219,7 @@ Do **not** use `depends_on` for entity relations — that is an assertion-level 
 - **Evidence** — source material backing an assertion (code reference, manual review, test)
 - **Dependency** — assertion-level `depends-on` chain; when a base assertion is retracted, dependents cascade to `uncertain` (TMS-style truth maintenance)
 - **Retraction** — marks an assertion as retracted and cascades `uncertain` to dependent assertions that have no other active support
-- **Sync** — tree-sitter based code structure analysis, idempotent and repeatable. Walks directories, parses source files into ASTs, extracts definitions (functions/classes/structs/methods), creates entities + `contains` relations, cleans up stale entities (skipping those with existing assertions). All auto-created entities carry origin `Scan`.
+- **Sync** — tree-sitter based code structure analysis, idempotent and repeatable. Scans from the project root (derived from `.cog/cog.db` location), parses source files into ASTs, extracts definitions (functions/classes/structs/methods), creates entities + `contains` relations, cleans up stale entities (skipping those with existing assertions). All auto-created entities carry origin `Scan`. Use `cog sync --init` to create `.cog/` on first use.
 - **Experiment** — lightweight hypothesis testing on in-memory snapshots; `try` for quick one-liners, step-by-step for complex scenarios. Commit replays staged operations to the real model.
 - **Backup** — full DB snapshot (VACUUM INTO) for safety nets before large-scale refactors
 
