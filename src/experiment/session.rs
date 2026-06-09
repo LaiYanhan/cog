@@ -69,10 +69,7 @@ impl Experiment {
         // Load structural sub-space via adaptive BFS (no depth limit, cap by max_nodes).
         let structure = StructureSpace::load(repo, entity_name, 0, max_nodes)?;
 
-        // Get the focus entity id for semantic loading
-        let focus = repo
-            .get_entity_by_name(entity_name)?
-            .ok_or_else(|| anyhow::anyhow!("entity not found: {entity_name}"))?;
+        let focus = repo.resolve_entity(entity_name)?;
 
         // Load semantic sub-space for the focus entity
         let semantic = SemanticSpace::load(repo, &focus.id)?;

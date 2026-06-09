@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 
 use crate::domain::*;
 use crate::repo::Repository;
@@ -14,9 +14,7 @@ impl TraceEngine {
     /// Loads the semantic sub-space around the entity, then performs
     /// DFS in pure memory to trace assertion dependency chains.
     pub fn trace(repo: &dyn Repository, entity_name: &str) -> Result<TraceTree> {
-        let entity = repo
-            .get_entity_by_name(entity_name)?
-            .ok_or_else(|| anyhow!("entity not found: {entity_name}"))?;
+        let entity = repo.resolve_entity(entity_name)?;
 
         // Load semantic space for this entity
         let semantic = SemanticSpace::load(repo, &entity.id)?;

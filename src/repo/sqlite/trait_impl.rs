@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use crate::domain::*;
 use crate::repo::Repository;
@@ -20,6 +20,25 @@ impl Repository for SqliteRepository {
         self.get_entity_by_name(name)
     }
 
+    fn resolve_entity(&self, name: &str) -> Result<Entity> {
+        // 1. Exact match
+        if let Some(entity) = self.get_entity_by_name(name)? {
+            return Ok(entity);
+        }
+        // 2. Suffix match: find entities ending with ::{name}
+        let candidates = self.find_entities_by_suffix(name)?;
+        match candidates.len() {
+            0 => bail!("entity not found: {name}"),
+            1 => Ok(candidates.into_iter().next().unwrap()),
+            _ => {
+                let names: Vec<&str> = candidates.iter().map(|e| e.qualified_name.as_str()).take(5).collect();
+                bail!(
+                    "entity not found: {name}\n  Did you mean one of these?\n{}",
+                    names.iter().map(|n| format!("    - {n}")).collect::<Vec<_>>().join("\n")
+                )
+            }
+        }
+    }
     fn list_entities(&self) -> Result<Vec<Entity>> {
         self.list_entities()
     }

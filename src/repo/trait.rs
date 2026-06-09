@@ -13,6 +13,9 @@ pub trait Repository {
     fn upsert_entity(&self, name: &str, kind: EntityKind, origin: EntityOrigin) -> Result<Entity>;
     fn get_entity(&self, id: &str) -> Result<Option<Entity>>;
     fn get_entity_by_name(&self, name: &str) -> Result<Option<Entity>>;
+    /// Resolve an entity by exact qualified name, falling back to suffix matching.
+    /// Returns the entity if exactly one match is found, or an error with suggestions.
+    fn resolve_entity(&self, name: &str) -> Result<Entity>;
     fn list_entities(&self) -> Result<Vec<Entity>>;
     fn list_entities_filtered(
         &self,

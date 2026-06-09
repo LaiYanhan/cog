@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 
 use crate::command::CommandOutput;
 use crate::domain::{AssertionStatus, QueryCard};
@@ -12,9 +12,7 @@ pub fn execute(
     compact: bool,
     output: OutputFormat,
 ) -> Result<CommandOutput> {
-    let entity_record = repo
-        .get_entity_by_name(entity)?
-        .ok_or_else(|| anyhow!("entity not found: {entity}"))?;
+    let entity_record = repo.resolve_entity(entity)?;
     let assertions = repo.get_assertions_for_entity(&entity_record.id)?;
     let assertions_with_evidence = assertions
         .into_iter()
