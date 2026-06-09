@@ -66,10 +66,10 @@ impl Experiment {
         description: String,
         max_nodes: usize,
     ) -> Result<Self> {
-        // Load structural sub-space via adaptive BFS (no depth limit, cap by max_nodes).
-        let structure = StructureSpace::load(repo, entity_name, 0, max_nodes)?;
-
+        // Resolve the focus entity (exact or fuzzy suffix match).
         let focus = repo.resolve_entity(entity_name)?;
+        // Load structural sub-space around the focus (BFS, no depth limit, cap by max_nodes).
+        let structure = StructureSpace::load(repo, &focus, 0, max_nodes)?;
 
         // Load semantic sub-space for the focus entity
         let semantic = SemanticSpace::load(repo, &focus.id)?;

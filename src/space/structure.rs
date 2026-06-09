@@ -47,12 +47,15 @@ pub struct StructureSpace {
 impl StructureSpace {
     // ── Loading ──────────────────────────────────────────────────────────
 
-    /// Load a subgraph centred on `root`, expanding via entity relations using
+    /// Load a subgraph centred on `focus`, expanding via entity relations using
     /// BFS up to `max_depth` hops or `max_nodes` entities (whichever is hit
     /// first).  Defaults to `max_depth = 3`, `max_nodes = 500` when set to 0.
+    ///
+    /// The caller is responsible for resolving the focus entity (e.g. via
+    /// `repo.resolve_entity()`).
     pub fn load(
         repo: &dyn Repository,
-        root: &str,
+        focus: &Entity,
         max_depth: usize,
         max_nodes: usize,
     ) -> Result<Self> {
@@ -63,7 +66,6 @@ impl StructureSpace {
             max_depth
         };
         let cap = if max_nodes == 0 { 500 } else { max_nodes };
-        let focus = repo.resolve_entity(root)?;
 
         // BFS: (entity_id, hop_distance)
         let mut visited: HashSet<String> = HashSet::new();

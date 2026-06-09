@@ -15,7 +15,7 @@ impl ImpactEngine {
         let entity = repo.resolve_entity(entity_name)?;
 
         // Load structure space — expand wide (depth 0 = unlimited, cap at 500 nodes)
-        let structure = StructureSpace::load(repo, entity_name, 0, 500)?;
+        let structure = StructureSpace::load(repo, &entity, 0, 500)?;
 
         // BFS in memory to collect all downstream entity IDs
         let downstream_ids: Vec<String> = {
