@@ -25,7 +25,7 @@ Cog is organized into six layers, bottom-up: **code space** (the source code bei
 
 ### Data Flow (per command)
 
-1. `cli/mod.rs` parses args (Clap derive)
+1. `src/cli.rs` parses args (Clap derive)
 2. Dispatches to `command/<module>::execute(repo, args)` where `repo` is `&dyn Repository` (or `&SqliteRepository` for retract)
 3. Execute reads/mutates through the `Repository` trait, produces a `CommandOutput { text, exit_code }`
 4. `main.rs` calls `output.emit()` and exits with `exit_code` if non-zero
@@ -41,19 +41,19 @@ Cog is organized into six layers, bottom-up: **code space** (the source code bei
 
 ## Key Directories
 
-| `src/cli/` | Clap-derived CLI definition (mod, args, experiment, backup), workflow state management |
-| `src/repo/` | Repository trait + SqliteRepository (split into 10 submodules) |
-| `src/domain/` | Core types: entity, assertion, evidence, relations, grounds, reports |
-| `src/command/` | One file per subcommand: most accept `&dyn Repository`, retract accepts `&SqliteRepository` |
-| `src/space/` | Graph algorithms: CascadeEngine, ImpactEngine, TraceEngine, SemanticSpace, StructureSpace |
-| `src/workflow/` | WorkflowState state machine + suggestion engine |
-| `src/format/` | TextRenderer — unified text output for all reports |
-| `src/analysis/` | Tree-sitter scanning: Scanner, ParserPool, FileWalker, language extractors |
+| `src/cli.rs` + `src/cli/` | Clap-derived CLI definition (args, experiment, backup), workflow state management |
+| `src/repo.rs` + `src/repo/` | Repository trait + SqliteRepository (split into 10 focused submodules) |
+| `src/domain.rs` + `src/domain/` | Core types: entity, assertion, evidence, relations, grounds, reports |
+| `src/command.rs` + `src/command/` | One file per subcommand: most accept `&dyn Repository`, retract accepts `&SqliteRepository` |
+| `src/space.rs` + `src/space/` | Graph algorithms: CascadeEngine, ImpactEngine, TraceEngine, SemanticSpace, StructureSpace |
+| `src/workflow.rs` + `src/workflow/` | WorkflowState state machine + suggestion engine |
+| `src/format.rs` + `src/format/` | TextRenderer — unified text output for all reports |
+| `src/analysis.rs` + `src/analysis/` | Tree-sitter scanning: Scanner, ParserPool, FileWalker, language extractors |
+| `src/experiment.rs` + `src/experiment/` | Hypothesis experiment: session, ops, report, persistence |
+| `src/backup.rs` + `src/backup/` | Full model backup: BackupManager (create/list/restore/drop) |
 | `tests/` | Integration + unit tests (24 total) |
 | `benchmark/` | Harbor Terminus-2 benchmark harness for A/B evaluation |
 | `skills/cog/` | Skill documentation for agent runtime |
-| `src/experiment/` | Hypothesis experiment: session, ops, report, persistence |
-| `src/backup/` | Full model backup: BackupManager (create/list/restore/drop) |
 ## Development Commands
 
 ```sh
@@ -155,7 +155,7 @@ Every command module exports exactly one public `execute()` function. Most accep
 
 ## Important Files
 
-| `src/repo/sqlite/` | SqliteRepository — split into 10 focused submodules |
+| `src/repo.rs` + `src/repo/` | SqliteRepository — split into 10 focused submodules |
 | `src/repo/trait.rs` | Repository trait — persistence contract |
 | `src/domain/entity.rs` | Entity, EntityKind, EntityOrigin, last_segment(), parent_qname() |
 | `src/domain/assertion.rs` | Assertion, AssertionKind, AssertionStatus |
@@ -169,10 +169,11 @@ Every command module exports exactly one public `execute()` function. Most accep
 | `src/format/text.rs` | TextRenderer — human-readable output |
 | `src/format/json.rs` | JsonRender — machine-readable JSON output |
 | `src/command/verify.rs` | Structural consistency checks |
-| `src/command/init_cmd.rs` | Tree-sitter scanning orchestration |
+| `src/command/sync_cmd.rs` | Tree-sitter scanning orchestration (sync) |
 | `src/domain/metrics.rs` | EntityMetrics — fan_in, fan_out, line_count, visibility |
 | `src/experiment/session.rs` | Experiment session with BFS subgraph loading |
 | `src/backup/manager.rs` | BackupManager wrapper around VACUUM INTO |
+| `src/analysis/extractors.rs` | Language extractors (Python, Rust, JS, Go, C, Java) |
 
 ## Runtime/Tooling Preferences
 - **No build script** (`build.rs` absent).
@@ -338,7 +339,7 @@ Cog is under active development. Schema changes, query interface changes, or sto
    cargo run -- backup create --name pre-migration
    ```
 
-2. **Write a migration** — the `SqliteRepository` already supports schema migrations. Add a new migration in `repo/sqlite/helpers.rs` that:
+2. **Write a migration** — the `SqliteRepository` already supports schema migrations. Add a new migration in `src/repo/sqlite/helpers.rs` that:
    - Checks current schema version (table exists, column exists, or a `pragma user_version` / schema version marker)
    - Alters tables additively (add columns, create new tables) — NEVER `DROP TABLE` or `DROP COLUMN`
    - Transforms existing data in-place or provides backward-compatible defaults for new columns
