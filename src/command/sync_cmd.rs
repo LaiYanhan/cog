@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
+use crate::analysis::extractors::{Definition, FileScan, Import};
+use crate::analysis::report::ScanReport;
 use crate::analysis::{Language, ScanConfig, Scanner};
 use crate::command::CommandOutput;
 use crate::domain::{
@@ -32,15 +34,393 @@ pub(crate) fn path_to_qualified(relative: &std::path::Path) -> String {
     without_ext.replace('/', "::")
 }
 
-/// Increment a counter in a string-keyed map using the EntityKind's Display output.
-fn inc_kind(counts: &mut HashMap<String, usize>, kind: EntityKind) {
-    *counts.entry(kind.to_string()).or_default() += 1;
+// SyncContext: shared mutable state for the entity-building phases
+
+/// Accumulator for entity IDs and relation counts produced during a sync.
+struct SyncContext {
+    dir_entities: HashMap<String, String>, // qualified_name → entity_id
+    file_entities: HashMap<String, String>, // qualified_name → entity_id
+    def_entity_ids: HashMap<String, String>, // qualified_name → entity_id
+    contains_count: usize,
+    uses_count: usize,
+    kind_counts: HashMap<String, usize>,
+    def_count: usize,
 }
 
-/// Look up a kind counter by EntityKind.
-fn get_kind(counts: &HashMap<String, usize>, kind: EntityKind) -> usize {
-    counts.get(kind.to_string().as_str()).copied().unwrap_or(0)
+impl SyncContext {
+    fn new() -> Self {
+        Self {
+            dir_entities: HashMap::new(),
+            file_entities: HashMap::new(),
+            def_entity_ids: HashMap::new(),
+            contains_count: 0,
+            uses_count: 0,
+            kind_counts: HashMap::new(),
+            def_count: 0,
+        }
+    }
+
+    fn inc_kind(&mut self, kind: EntityKind) {
+        *self.kind_counts.entry(kind.to_string()).or_default() += 1;
+    }
+
+    fn get_kind(&self, kind: EntityKind) -> usize {
+        self.kind_counts
+            .get(kind.to_string().as_str())
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn entities_created(&self) -> usize {
+        self.dir_entities.len() + self.file_entities.len() + self.def_count
+    }
+
+    fn relations_created(&self) -> usize {
+        self.contains_count + self.uses_count
+    }
+
+    /// Create directory Module entities and their contains hierarchy.
+    fn create_dir_entities(
+        &mut self,
+        repo: &dyn Repository,
+        file_scans: &[FileScan],
+        scan_root: &std::path::Path,
+    ) -> Result<()> {
+        // Collect all directory segments using the same prefix-stripping as path_to_qualified.
+        let mut all_dirs: Vec<String> = Vec::new();
+        for file_scan in file_scans {
+            let rel = file_scan
+                .path
+                .strip_prefix(scan_root)
+                .unwrap_or(&file_scan.path);
+            let parent_rel = rel.parent().unwrap_or(std::path::Path::new(""));
+            let parent_qname = path_to_qualified(parent_rel);
+            if parent_qname.is_empty() {
+                continue;
+            }
+            let mut current = String::new();
+            for segment in parent_qname.split("::") {
+                if !current.is_empty() {
+                    current.push_str("::");
+                }
+                current.push_str(segment);
+                all_dirs.push(current.clone());
+            }
+        }
+        all_dirs.sort();
+        all_dirs.dedup();
+
+        for dir_qname in &all_dirs {
+            let entity = repo.upsert_entity(dir_qname, EntityKind::Module, EntityOrigin::Scan)?;
+            self.dir_entities
+                .insert(dir_qname.clone(), entity.id.clone());
+
+            if let Some(parent) = parent_qname(dir_qname)
+                && !parent.is_empty()
+                && let Some(parent_id) = self.dir_entities.get(parent)
+            {
+                repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+                self.contains_count += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// Create file Module entities and directory → file contains relations.
+    fn create_file_entities(
+        &mut self,
+        repo: &dyn Repository,
+        file_scans: &[FileScan],
+        scan_root: &std::path::Path,
+    ) -> Result<()> {
+        for file_scan in file_scans {
+            let rel = file_scan
+                .path
+                .strip_prefix(scan_root)
+                .unwrap_or(&file_scan.path);
+            let file_qname = path_to_qualified(rel);
+
+            let entity = repo.upsert_entity(&file_qname, EntityKind::Module, EntityOrigin::Scan)?;
+            self.file_entities
+                .insert(file_qname.clone(), entity.id.clone());
+
+            if let Some(parent_rel) = rel.parent() {
+                let pqname = path_to_qualified(parent_rel);
+                if !pqname.is_empty()
+                    && let Some(parent_id) = self
+                        .dir_entities
+                        .get(&pqname)
+                        .or_else(|| self.file_entities.get(&pqname))
+                {
+                    repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+                    self.contains_count += 1;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Create definition entities and their contains relations to parents.
+    fn create_definition_entities(
+        &mut self,
+        repo: &dyn Repository,
+        definitions: &[Definition],
+        file_scans: &[FileScan],
+        scan_root: &std::path::Path,
+    ) -> Result<()> {
+        for def in definitions {
+            let entity = repo.upsert_entity(&def.qualified_name, def.kind, EntityOrigin::Scan)?;
+            self.def_entity_ids
+                .insert(def.qualified_name.clone(), entity.id.clone());
+            self.def_count += 1;
+            self.inc_kind(def.kind);
+
+            // Determine parent: explicit parent field, or fall back to containing file
+            let pqname = def
+                .parent
+                .as_deref()
+                .map(|p| {
+                    if p.contains("::") {
+                        p.to_string()
+                    } else {
+                        parent_qname(&def.qualified_name)
+                            .map(|m| m.to_string())
+                            .unwrap_or_else(|| p.to_string())
+                    }
+                })
+                .or_else(|| {
+                    file_scans
+                        .iter()
+                        .find(|fs| {
+                            fs.definitions
+                                .iter()
+                                .any(|d| d.qualified_name == def.qualified_name)
+                        })
+                        .and_then(|fs| {
+                            let rel = fs.path.strip_prefix(scan_root).unwrap_or(&fs.path);
+                            let file_qname = path_to_qualified(rel);
+                            self.file_entities
+                                .contains_key(&file_qname)
+                                .then_some(file_qname)
+                        })
+                });
+
+            if let Some(pqname) = &pqname
+                && let Some(parent_id) = self
+                    .def_entity_ids
+                    .get(pqname)
+                    .or_else(|| self.file_entities.get(pqname))
+            {
+                repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+                self.contains_count += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// Create uses relations for imports (only if target entity exists).
+    fn create_import_relations(
+        &mut self,
+        repo: &dyn Repository,
+        imports: &[Import],
+        file_scans: &[FileScan],
+        scan_root: &std::path::Path,
+    ) -> Result<()> {
+        // Build index: module_path → containing file's qualified name
+        let mut import_file_map: HashMap<String, String> = HashMap::new();
+        for file_scan in file_scans {
+            let rel = file_scan
+                .path
+                .strip_prefix(scan_root)
+                .unwrap_or(&file_scan.path);
+            let file_qname = path_to_qualified(rel);
+            for imp in &file_scan.imports {
+                import_file_map
+                    .entry(imp.module_path.clone())
+                    .or_insert_with(|| file_qname.clone());
+            }
+        }
+
+        for import in imports {
+            let file_qname = match import_file_map.get(&import.module_path) {
+                Some(fq) => fq.clone(),
+                None => continue,
+            };
+            let from_id = match self.file_entities.get(&file_qname) {
+                Some(id) => id.clone(),
+                None => continue,
+            };
+
+            if let Some(target_id) = self.def_entity_ids.get(&import.module_path) {
+                repo.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
+                self.uses_count += 1;
+            }
+
+            for name in &import.imported_names {
+                let qualified = format!("{}::{}", import.module_path, name);
+                if let Some(target_id) = self.def_entity_ids.get(&qualified) {
+                    repo.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
+                    self.uses_count += 1;
+                }
+            }
+        }
+        Ok(())
+    }
 }
+
+// Standalone phase functions
+
+/// Build the set of all qualified names that exist in the current scan,
+/// including definitions, files, and directory ancestors.
+fn collect_scanned_names(result: &ScanReport, scan_root: &std::path::Path) -> HashSet<String> {
+    let mut names: HashSet<String> = result
+        .definitions
+        .iter()
+        .map(|d| d.qualified_name.clone())
+        .collect();
+
+    for file_scan in &result.file_scans {
+        let rel = file_scan
+            .path
+            .strip_prefix(scan_root)
+            .unwrap_or(&file_scan.path);
+        let file_qname = path_to_qualified(rel);
+        names.insert(file_qname.clone());
+
+        // Walk up directory ancestors using the original relative path,
+        // applying path_to_qualified to each directory (not the already-stripped
+        // file_qname, which loses the src/ prefix for top-level files).
+        let mut dir_ancestor = rel.parent();
+        while let Some(dir_path) = dir_ancestor {
+            let dir_qname = path_to_qualified(dir_path);
+            if dir_qname.is_empty() {
+                break;
+            }
+            names.insert(dir_qname);
+            dir_ancestor = dir_path.parent();
+        }
+    }
+
+    names
+}
+
+/// Remove Scan-origin entities no longer present in the codebase.
+///
+/// Returns `(removed, skipped)` where `skipped` are stale entities that
+/// were retained because they have assertions recorded against them.
+fn remove_stale_entities(
+    repo: &dyn Repository,
+    scanned_names: &HashSet<String>,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let auto_scanned_names = repo.get_scanned_entity_names()?;
+
+    let mut stale_names: Vec<String> = auto_scanned_names
+        .iter()
+        .filter(|name| !scanned_names.contains(*name))
+        .cloned()
+        .collect();
+    stale_names.sort();
+
+    let mut removed: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for name in &stale_names {
+        // Safety check: don't auto-delete entities with assertions.
+        // The agent may have recorded knowledge claims against them.
+        if let Ok(Some(entity)) = repo.get_entity_by_name(name) {
+            let assertions = repo
+                .get_assertions_for_entity(&entity.id)
+                .unwrap_or_default();
+            if !assertions.is_empty() {
+                skipped.push(name.clone());
+                continue;
+            }
+        }
+        if repo.delete_entity(name)? {
+            removed.push(name.clone());
+        }
+    }
+
+    Ok((removed, skipped))
+}
+
+/// Compute fan_in/fan_out metrics for all entities and persist them.
+fn compute_fan_metrics(repo: &dyn Repository) -> Result<()> {
+    let all_entities = repo.list_entities()?;
+    let relations = repo.list_entity_relations()?;
+
+    let mut fan_counts: HashMap<&str, (u32, u32)> = HashMap::new();
+    for entity in &all_entities {
+        fan_counts.entry(&entity.id).or_insert((0, 0));
+    }
+    for rel in &relations {
+        if let Some(from) = fan_counts.get_mut(rel.from_entity.as_str()) {
+            from.1 += 1;
+        }
+        if let Some(to) = fan_counts.get_mut(rel.to_entity.as_str()) {
+            to.0 += 1;
+        }
+    }
+
+    for entity in &all_entities {
+        if let Some(&(fan_in, fan_out)) = fan_counts.get(entity.id.as_str())
+            && (fan_in > 0 || fan_out > 0)
+        {
+            let mut metrics = entity.metrics.clone();
+            metrics.fan_in = Some(fan_in);
+            metrics.fan_out = Some(fan_out);
+            let _ = repo.update_entity_metrics(&entity.id, &metrics);
+        }
+    }
+
+    Ok(())
+}
+
+/// Assemble the final `SyncReport` from phase results.
+fn build_report(
+    result: &ScanReport,
+    ctx: &SyncContext,
+    removed: &[String],
+    skipped: &[String],
+    after_entities: usize,
+    after_assertions: usize,
+) -> SyncReport {
+    let has_drift = !removed.is_empty() || (!skipped.is_empty());
+
+    let mut entity_counts: HashMap<String, usize> = HashMap::new();
+    let module_count =
+        ctx.get_kind(EntityKind::Module) + ctx.dir_entities.len() + ctx.file_entities.len();
+    if module_count > 0 {
+        entity_counts.insert("module".to_string(), module_count);
+    }
+    for kind in &[
+        EntityKind::Type,
+        EntityKind::Function,
+        EntityKind::Method,
+        EntityKind::Field,
+    ] {
+        let count = ctx.get_kind(*kind);
+        if count > 0 {
+            entity_counts.insert(kind.to_string(), count);
+        }
+    }
+
+    SyncReport {
+        files_scanned: result.files_scanned,
+        files_by_language: result.files_by_language.clone(),
+        entities_created: ctx.entities_created(),
+        entities_removed: removed.len(),
+        relations_created: ctx.relations_created(),
+        entity_counts_by_kind: entity_counts,
+        stale_entities: removed.to_vec(),
+        stale_skipped: skipped.to_vec(),
+        dry_run: false,
+        has_drift,
+        after_entities,
+        after_assertions,
+    }
+}
+
+// Command entry point
 
 /// Sync the cognitive model with the codebase.
 ///
@@ -86,7 +466,7 @@ pub fn execute(
         ));
     }
 
-    // ── Dry-run path: just summarise ──────────────────────────────────
+    // Dry-run path: just summarise
     if dry_run {
         let mut entity_counts: HashMap<String, usize> = HashMap::new();
         for def in &result.definitions {
@@ -109,309 +489,46 @@ pub fn execute(
         return Ok(CommandOutput::success(format::emit_report(&report, output)));
     }
 
-    // ── Build entity hierarchy ────────────────────────────────────────
-    let mut dir_entities: HashMap<String, String> = HashMap::new(); // qualified_name → entity_id
-    let mut file_entities: HashMap<String, String> = HashMap::new(); // qualified_name → entity_id
-    let mut def_entity_ids: HashMap<String, String> = HashMap::new(); // qualified_name → entity_id
-    let mut contains_count: usize = 0;
-    let mut uses_count: usize = 0;
+    // Build entity hierarchy
+    let mut ctx = SyncContext::new();
+    ctx.create_dir_entities(repo, &result.file_scans, &scan_root)?;
+    ctx.create_file_entities(repo, &result.file_scans, &scan_root)?;
+    ctx.create_definition_entities(repo, &result.definitions, &result.file_scans, &scan_root)?;
+    ctx.create_import_relations(repo, &result.imports, &result.file_scans, &scan_root)?;
 
-    // Collect all directory segments using the same prefix-stripping as path_to_qualified.
-    let mut all_dirs: Vec<String> = Vec::new();
-    for file_scan in &result.file_scans {
-        let rel = file_scan
-            .path
-            .strip_prefix(&scan_root)
-            .unwrap_or(&file_scan.path);
-        let parent_rel = rel.parent().unwrap_or(std::path::Path::new(""));
-        let parent_qname = path_to_qualified(parent_rel);
-        if parent_qname.is_empty() {
-            continue;
-        }
-        let mut current = String::new();
-        for segment in parent_qname.split("::") {
-            if !current.is_empty() {
-                current.push_str("::");
-            }
-            current.push_str(segment);
-            all_dirs.push(current.clone());
-        }
-    }
-    all_dirs.sort();
-    all_dirs.dedup();
+    // Drift cleanup
+    let scanned_names = collect_scanned_names(&result, &scan_root);
+    let (removed, skipped) = remove_stale_entities(repo, &scanned_names)?;
 
-    // Create directory Module entities + contains hierarchy
-    for dir_qname in &all_dirs {
-        let entity = repo.upsert_entity(dir_qname, EntityKind::Module, EntityOrigin::Scan)?;
-        dir_entities.insert(dir_qname.clone(), entity.id.clone());
-
-        if let Some(parent) = parent_qname(dir_qname)
-            && !parent.is_empty()
-            && let Some(parent_id) = dir_entities.get(parent)
-        {
-            repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
-            contains_count += 1;
-        }
-    }
-
-    // Create file Module entities + directory → file contains
-    for file_scan in &result.file_scans {
-        let rel = file_scan
-            .path
-            .strip_prefix(&scan_root)
-            .unwrap_or(&file_scan.path);
-        let file_qname = path_to_qualified(rel);
-
-        let entity = repo.upsert_entity(&file_qname, EntityKind::Module, EntityOrigin::Scan)?;
-        file_entities.insert(file_qname.clone(), entity.id.clone());
-
-        if let Some(parent_rel) = rel.parent() {
-            let parent_qname = path_to_qualified(parent_rel);
-            if !parent_qname.is_empty()
-                && let Some(parent_id) = dir_entities
-                    .get(&parent_qname)
-                    .or_else(|| file_entities.get(&parent_qname))
-            {
-                repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
-                contains_count += 1;
-            }
-        }
-    }
-
-    let mut kind_counts: HashMap<String, usize> = HashMap::new();
-    let mut def_count: usize = 0;
-
-    for def in &result.definitions {
-        let entity = repo.upsert_entity(&def.qualified_name, def.kind, EntityOrigin::Scan)?;
-        def_entity_ids.insert(def.qualified_name.clone(), entity.id.clone());
-        def_count += 1;
-        inc_kind(&mut kind_counts, def.kind);
-
-        // Determine parent: explicit parent field, or fall back to containing file
-        let parent_qname = def
-            .parent
-            .as_deref()
-            .map(|p| {
-                if p.contains("::") {
-                    p.to_string()
-                } else {
-                    parent_qname(&def.qualified_name)
-                        .map(|m| m.to_string())
-                        .unwrap_or_else(|| p.to_string())
-                }
-            })
-            .or_else(|| {
-                result
-                    .file_scans
-                    .iter()
-                    .find(|fs| {
-                        fs.definitions
-                            .iter()
-                            .any(|d| d.qualified_name == def.qualified_name)
-                    })
-                    .and_then(|fs| {
-                        let rel = fs.path.strip_prefix(&scan_root).unwrap_or(&fs.path);
-                        let file_qname = path_to_qualified(rel);
-                        file_entities
-                            .contains_key(&file_qname)
-                            .then_some(file_qname)
-                    })
-            });
-
-        if let Some(pqname) = &parent_qname
-            && let Some(parent_id) = def_entity_ids
-                .get(pqname)
-                .or_else(|| file_entities.get(pqname))
-        {
-            repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
-            contains_count += 1;
-        }
-    }
-
-    // Build index: module_path → containing file's qualified name
-    let mut import_file_map: HashMap<String, String> = HashMap::new();
-    for file_scan in &result.file_scans {
-        let rel = file_scan
-            .path
-            .strip_prefix(&scan_root)
-            .unwrap_or(&file_scan.path);
-        let file_qname = path_to_qualified(rel);
-        for imp in &file_scan.imports {
-            import_file_map
-                .entry(imp.module_path.clone())
-                .or_insert_with(|| file_qname.clone());
-        }
-    }
-
-    // Create uses relations for imports (only if target entity exists)
-    for import in &result.imports {
-        let file_qname = match import_file_map.get(&import.module_path) {
-            Some(fq) => fq.clone(),
-            None => continue,
-        };
-        let from_id = match file_entities.get(&file_qname) {
-            Some(id) => id.clone(),
-            None => continue,
-        };
-
-        if let Some(target_id) = def_entity_ids.get(&import.module_path) {
-            repo.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
-            uses_count += 1;
-        }
-
-        for name in &import.imported_names {
-            let qualified = format!("{}::{}", import.module_path, name);
-            if let Some(target_id) = def_entity_ids.get(&qualified) {
-                repo.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
-                uses_count += 1;
-            }
-        }
-    }
-
-    // ── Drift cleanup: remove Scan-origin entities no longer in code ──
-    // Build the set of all names that exist in the current scan.
-    let mut scanned_names: HashSet<String> = result
-        .definitions
-        .iter()
-        .map(|d| d.qualified_name.clone())
-        .collect();
-
-    // Also include module entities (directories + files) — these are created
-    // by init/sync and must be in the scanned set for stale detection.
-    for file_scan in &result.file_scans {
-        let rel = file_scan
-            .path
-            .strip_prefix(&scan_root)
-            .unwrap_or(&file_scan.path);
-        let file_qname = path_to_qualified(rel);
-        scanned_names.insert(file_qname.clone());
-
-        // Walk up directory ancestors using the original relative path,
-        // applying path_to_qualified to each directory (not the already-stripped
-        // file_qname, which loses the src/ prefix for top-level files).
-        let mut dir_ancestor = rel.parent();
-        while let Some(dir_path) = dir_ancestor {
-            let dir_qname = path_to_qualified(dir_path);
-            if dir_qname.is_empty() {
-                break;
-            }
-            scanned_names.insert(dir_qname);
-            dir_ancestor = dir_path.parent();
-        }
-    }
-
-    let auto_scanned_names = repo.get_scanned_entity_names()?;
-
-    let mut stale_names: Vec<String> = auto_scanned_names
-        .iter()
-        .filter(|name| !scanned_names.contains(*name))
-        .cloned()
-        .collect();
-    stale_names.sort();
-
-    let mut removed: Vec<String> = Vec::new();
-    let mut skipped: Vec<String> = Vec::new();
-    for name in &stale_names {
-        // Safety check: don't auto-delete entities with assertions.
-        // The agent may have recorded knowledge claims against them.
-        if let Ok(Some(entity)) = repo.get_entity_by_name(name) {
-            let assertions = repo
-                .get_assertions_for_entity(&entity.id)
-                .unwrap_or_default();
-            if !assertions.is_empty() {
-                skipped.push(name.clone());
-                continue;
-            }
-        }
-        if repo.delete_entity(name)? {
-            removed.push(name.clone());
-        }
-    }
-
-    let entities_created = dir_entities.len() + file_entities.len() + def_count;
-    let has_drift =
-        !removed.is_empty() || (!stale_names.is_empty() && stale_names.len() != removed.len());
-
-    // ── Changelog ──────────────────────────────────────────────────────
+    // Changelog
     repo.append_changelog(
         ChangelogAction::Sync,
         "*",
         &format!(
             "created={} removed={} relations={}",
-            entities_created,
+            ctx.entities_created(),
             removed.len(),
-            contains_count + uses_count,
+            ctx.relations_created(),
         ),
     )?;
 
-    // ── Compute fan_in/fan_out metrics ───────────────────────────────
-    {
-        let all_entities = repo.list_entities()?;
-        let relations = repo.list_entity_relations()?;
+    // Compute fan_in/fan_out metrics
+    compute_fan_metrics(repo)?;
 
-        let mut fan_counts: HashMap<&str, (u32, u32)> = HashMap::new();
-        for entity in &all_entities {
-            fan_counts.entry(&entity.id).or_insert((0, 0));
-        }
-        for rel in &relations {
-            if let Some(from) = fan_counts.get_mut(rel.from_entity.as_str()) {
-                from.1 += 1;
-            }
-            if let Some(to) = fan_counts.get_mut(rel.to_entity.as_str()) {
-                to.0 += 1;
-            }
-        }
-
-        for entity in &all_entities {
-            if let Some(&(fan_in, fan_out)) = fan_counts.get(entity.id.as_str())
-                && (fan_in > 0 || fan_out > 0)
-            {
-                let mut metrics = entity.metrics.clone();
-                metrics.fan_in = Some(fan_in);
-                metrics.fan_out = Some(fan_out);
-                let _ = repo.update_entity_metrics(&entity.id, &metrics);
-            }
-        }
-    }
-
-    // ── Build report ──────────────────────────────────────────────────
-    let mut entity_counts: HashMap<String, usize> = HashMap::new();
-    let module_count =
-        get_kind(&kind_counts, EntityKind::Module) + dir_entities.len() + file_entities.len();
-    if module_count > 0 {
-        entity_counts.insert("module".to_string(), module_count);
-    }
-    for kind in &[
-        EntityKind::Type,
-        EntityKind::Function,
-        EntityKind::Method,
-        EntityKind::Field,
-    ] {
-        let count = get_kind(&kind_counts, *kind);
-        if count > 0 {
-            entity_counts.insert(kind.to_string(), count);
-        }
-    }
-
+    // Build report
     let after_entities = repo.list_entities()?.len();
     let after_assertions = repo.list_assertions()?.len();
-
-    let report = SyncReport {
-        files_scanned: result.files_scanned,
-        files_by_language: result.files_by_language.clone(),
-        entities_created,
-        entities_removed: removed.len(),
-        relations_created: contains_count + uses_count,
-        entity_counts_by_kind: entity_counts,
-        stale_entities: removed,
-        stale_skipped: skipped,
-        dry_run: false,
-        has_drift,
+    let report = build_report(
+        &result,
+        &ctx,
+        &removed,
+        &skipped,
         after_entities,
         after_assertions,
-    };
+    );
+
     let mut out = CommandOutput::success(format::emit_report(&report, output));
-    out.has_drift = has_drift;
+    out.has_drift = report.has_drift;
     Ok(out)
 }
 
