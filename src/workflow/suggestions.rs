@@ -65,6 +65,116 @@ fn experiment_summary(experiments: &[crate::domain::ActiveExperiment]) -> (usize
     (drafts, evaluated)
 }
 
+// ── Phase-specific suggestion functions ──────────────────────────────────────
+
+fn suggest_fresh_scan(repo: &dyn Repository, stats: &ModelStats) -> Vec<SuggestedAction> {
+    let mut actions = Vec::new();
+    actions.push(SuggestedAction {
+        action: ActionKind::StartRecording,
+        description: format!(
+            "{} entities found. Start recording assertions.",
+            stats.entities
+        ),
+        example_command: "cog query <core_entity>".into(),
+    });
+    let orphans = count_orphan_entities(repo, stats);
+    if orphans > 0 {
+        actions.push(SuggestedAction {
+            action: ActionKind::RecordMissingContracts,
+            description: format!("{orphans} entities have no assertions yet."),
+            example_command: "cog assert <entity> --kind contract --claim \"...\"".into(),
+        });
+    }
+    actions
+}
+
+fn suggest_exploring(
+    repo: &dyn Repository,
+    stats: &ModelStats,
+    coverage_pct: f64,
+) -> Vec<SuggestedAction> {
+    let mut actions = Vec::new();
+    actions.push(SuggestedAction {
+        action: ActionKind::AssessImpact,
+        description: "Run impact analysis to understand downstream dependencies.".into(),
+        example_command: "cog impact <core_entity>".into(),
+    });
+
+    if coverage_pct > COVERAGE_REFINE_THRESHOLD {
+        actions.push(SuggestedAction {
+            action: ActionKind::VerifyConsistency,
+            description: format!(
+                "Coverage is {:.0}%. Verify consistency and refine existing assertions.",
+                coverage_pct
+            ),
+            example_command: "cog verify".into(),
+        });
+        actions.push(SuggestedAction {
+            action: ActionKind::ImplementNow,
+            description: "Good coverage. Consider starting implementation.".into(),
+            example_command:
+                "cog experiment try <entity> --kind correction --claim \"...\" --grounds \"code:<entity>\""
+                    .into(),
+        });
+    } else if coverage_pct > COVERAGE_IMPLEMENT_THRESHOLD {
+        actions.push(SuggestedAction {
+            action: ActionKind::ImplementNow,
+            description: format!(
+                "Coverage is {:.0}%. Consider a sandbox experiment before implementing.",
+                coverage_pct
+            ),
+            example_command:
+                "cog experiment try <entity> --kind correction --claim \"...\" --grounds \"code:<entity>\""
+                    .into(),
+        });
+    } else {
+        let orphans = count_orphan_entities(repo, stats);
+        if orphans > 0 {
+            actions.push(SuggestedAction {
+                action: ActionKind::RecordMissingContracts,
+                description: format!("{orphans} entities have no assertions yet."),
+                example_command: "cog assert <entity> --kind contract --claim \"...\"".into(),
+            });
+        }
+    }
+    actions
+}
+
+fn suggest_post_change() -> Vec<SuggestedAction> {
+    vec![SuggestedAction {
+        action: ActionKind::RecordFix,
+        description: "Code changed. Record corrections for changed entities.".into(),
+        example_command:
+            "cog assert <entity> --kind correction --claim \"...\" --grounds \"code:<entity>\""
+                .into(),
+    }]
+}
+
+fn suggest_debugging(stats: &ModelStats) -> Vec<SuggestedAction> {
+    let mut actions = Vec::new();
+    if stats.uncertain_assertions > 0 {
+        actions.push(SuggestedAction {
+            action: ActionKind::ReviewUncertainAssertions,
+            description: format!(
+                "{} assertions are uncertain since last retraction.",
+                stats.uncertain_assertions
+            ),
+            example_command: "cog query <affected_entity>".into(),
+        });
+    }
+    actions.push(SuggestedAction {
+        action: ActionKind::TraceRootCause,
+        description: "Trace dependency chains to find root causes.".into(),
+        example_command: "cog trace <entity>".into(),
+    });
+    actions.push(SuggestedAction {
+        action: ActionKind::VerifyConsistency,
+        description: "Run verify to check structural consistency.".into(),
+        example_command: "cog verify".into(),
+    });
+    actions
+}
+
 fn suggest_for_ready(
     phase: &WorkflowPhase,
     repo: &dyn Repository,
@@ -104,100 +214,13 @@ fn suggest_for_ready(
     }
 
     // ── Phase-specific suggestions ───────────────────────────────────────
-    match phase {
-        WorkflowPhase::FreshScan => {
-            actions.push(SuggestedAction {
-                action: ActionKind::StartRecording,
-                description: format!(
-                    "{} entities found. Start recording assertions.",
-                    stats.entities
-                ),
-                example_command: "cog query <core_entity>".into(),
-            });
-            let orphans = count_orphan_entities(repo, &stats);
-            if orphans > 0 {
-                actions.push(SuggestedAction {
-                    action: ActionKind::RecordMissingContracts,
-                    description: format!("{orphans} entities have no assertions yet."),
-                    example_command: "cog assert <entity> --kind contract --claim \"...\"".into(),
-                });
-            }
-        }
-
-        WorkflowPhase::Exploring => {
-            actions.push(SuggestedAction {
-                action: ActionKind::AssessImpact,
-                description: "Run impact analysis to understand downstream dependencies.".into(),
-                example_command: "cog impact <core_entity>".into(),
-            });
-
-            if coverage_pct > COVERAGE_REFINE_THRESHOLD {
-                actions.push(SuggestedAction {
-                    action: ActionKind::VerifyConsistency,
-                    description: format!(
-                        "Coverage is {:.0}%. Verify consistency and refine existing assertions.",
-                        coverage_pct
-                    ),
-                    example_command: "cog verify".into(),
-                });
-                actions.push(SuggestedAction {
-                    action: ActionKind::ImplementNow,
-                    description: "Good coverage. Consider starting implementation.".into(),
-                    example_command: "cog experiment try <entity> --kind correction --claim \"...\" --grounds \"code:<entity>\"".into(),
-                });
-            } else if coverage_pct > COVERAGE_IMPLEMENT_THRESHOLD {
-                actions.push(SuggestedAction {
-                    action: ActionKind::ImplementNow,
-                    description: format!(
-                        "Coverage is {:.0}%. Consider a sandbox experiment before implementing.",
-                        coverage_pct
-                    ),
-                    example_command: "cog experiment try <entity> --kind correction --claim \"...\" --grounds \"code:<entity>\"".into(),
-                });
-            } else {
-                let orphans = count_orphan_entities(repo, &stats);
-                if orphans > 0 {
-                    actions.push(SuggestedAction {
-                        action: ActionKind::RecordMissingContracts,
-                        description: format!("{orphans} entities have no assertions yet."),
-                        example_command: "cog assert <entity> --kind contract --claim \"...\""
-                            .into(),
-                    });
-                }
-            }
-        }
-
-        WorkflowPhase::PostChange => {
-            actions.push(SuggestedAction {
-                action: ActionKind::RecordFix,
-                description: "Code changed. Record corrections for changed entities.".into(),
-                example_command: "cog assert <entity> --kind correction --claim \"...\" --grounds \"code:<entity>\"".into(),
-            });
-        }
-
-        WorkflowPhase::Debugging => {
-            if stats.uncertain_assertions > 0 {
-                actions.push(SuggestedAction {
-                    action: ActionKind::ReviewUncertainAssertions,
-                    description: format!(
-                        "{} assertions are uncertain since last retraction.",
-                        stats.uncertain_assertions
-                    ),
-                    example_command: "cog query <affected_entity>".into(),
-                });
-            }
-            actions.push(SuggestedAction {
-                action: ActionKind::TraceRootCause,
-                description: "Trace dependency chains to find root causes.".into(),
-                example_command: "cog trace <entity>".into(),
-            });
-            actions.push(SuggestedAction {
-                action: ActionKind::VerifyConsistency,
-                description: "Run verify to check structural consistency.".into(),
-                example_command: "cog verify".into(),
-            });
-        }
-    }
+    let phase_actions = match phase {
+        WorkflowPhase::FreshScan => suggest_fresh_scan(repo, &stats),
+        WorkflowPhase::Exploring => suggest_exploring(repo, &stats, coverage_pct),
+        WorkflowPhase::PostChange => suggest_post_change(),
+        WorkflowPhase::Debugging => suggest_debugging(&stats),
+    };
+    actions.extend(phase_actions);
 
     // ── Stagnation detection ────────────────────────────────────────────
     if let Some(warning) = detect_stagnation(&changelog, active_experiments) {

@@ -2,7 +2,7 @@ mod args;
 mod backup;
 mod experiment;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -237,73 +237,8 @@ impl Cli {
                 wf.transition_browse();
                 Ok(out)
             }
-            Commands::Experiment { action } => {
-                use ExperimentAction::*;
-                match action {
-                    Try {
-                        entity,
-                        kind,
-                        claim,
-                        grounds,
-                        desc,
-                        depends_on,
-                    } => command::experiment_cmd::try_experiment(
-                        store,
-                        &command::experiment_cmd::TryArgs {
-                            entity: entity.clone(),
-                            kind: *kind,
-                            claim: claim.clone(),
-                            grounds: grounds.clone(),
-                            desc: desc.clone(),
-                            depends_on: depends_on.clone(),
-                            cog_dir: &cog_dir,
-                        },
-                    ),
-                    Start {
-                        entity,
-                        description,
-                        max_nodes,
-                    } => command::experiment_cmd::start(
-                        store,
-                        entity,
-                        description.clone(),
-                        *max_nodes,
-                        &cog_dir,
-                    ),
-                    Hypothesize {
-                        id,
-                        entity,
-                        kind,
-                        claim,
-                        grounds,
-                    } => command::experiment_cmd::hypothesize(
-                        id, entity, *kind, claim, grounds, &cog_dir,
-                    ),
-                    HypotheticalDelete { id, entity } => {
-                        command::experiment_cmd::hypothesize_delete(id, entity, &cog_dir)
-                    }
-                    HypotheticalRelation { id, from, to, kind } => {
-                        command::experiment_cmd::hypothesize_relation(id, from, to, *kind, &cog_dir)
-                    }
-                    Evaluate { id } => command::experiment_cmd::evaluate(id, &cog_dir),
-                    Report { id } => command::experiment_cmd::report(id, &cog_dir),
-                    Commit { id } => command::experiment_cmd::commit(store, id, &cog_dir),
-                    Discard { id } => command::experiment_cmd::discard(id, &cog_dir),
-                    List => command::experiment_cmd::list(&cog_dir),
-                    Save { id } => command::experiment_cmd::save(id, &cog_dir),
-                    Load { id } => command::experiment_cmd::load(id, &cog_dir),
-                }
-            }
-            Commands::Backup { action } => {
-                let mgr = BackupManager::new(&self.db_path());
-                use BackupAction::*;
-                match action {
-                    Create { name } => command::backup_cmd::create(store, &mgr, name.clone()),
-                    List => command::backup_cmd::list(&mgr),
-                    Restore { name } => command::backup_cmd::restore(&mgr, name),
-                    Drop { name } => command::backup_cmd::drop(&mgr, name),
-                }
-            }
+            Commands::Experiment { action } => self.run_experiment(action, &cog_dir, store),
+            Commands::Backup { action } => self.run_backup(action, store),
             Commands::Sync(args) => {
                 let lang_list: Option<Vec<String>> = args
                     .lang
@@ -324,8 +259,88 @@ impl Cli {
             Commands::Next(_) => command::next_cmd::execute(store, &wf, &cog_dir, self.output),
         };
 
-        // Persist workflow state after every command
-        let _ = wf.save(&cog_dir);
+        self.apply_workflow_then_save(&mut wf, &cog_dir, result)
+    }
+
+    fn run_experiment(
+        &self,
+        action: &ExperimentAction,
+        cog_dir: &Path,
+        store: &SqliteRepository,
+    ) -> Result<CommandOutput> {
+        use ExperimentAction::*;
+        match action {
+            Try {
+                entity,
+                kind,
+                claim,
+                grounds,
+                desc,
+                depends_on,
+            } => command::experiment_cmd::try_experiment(
+                store,
+                &command::experiment_cmd::TryArgs {
+                    entity: entity.clone(),
+                    kind: *kind,
+                    claim: claim.clone(),
+                    grounds: grounds.clone(),
+                    desc: desc.clone(),
+                    depends_on: depends_on.clone(),
+                    cog_dir,
+                },
+            ),
+            Start {
+                entity,
+                description,
+                max_nodes,
+            } => command::experiment_cmd::start(
+                store,
+                entity,
+                description.clone(),
+                *max_nodes,
+                cog_dir,
+            ),
+            Hypothesize {
+                id,
+                entity,
+                kind,
+                claim,
+                grounds,
+            } => command::experiment_cmd::hypothesize(id, entity, *kind, claim, grounds, cog_dir),
+            HypotheticalDelete { id, entity } => {
+                command::experiment_cmd::hypothesize_delete(id, entity, cog_dir)
+            }
+            HypotheticalRelation { id, from, to, kind } => {
+                command::experiment_cmd::hypothesize_relation(id, from, to, *kind, cog_dir)
+            }
+            Evaluate { id } => command::experiment_cmd::evaluate(id, cog_dir),
+            Report { id } => command::experiment_cmd::report(id, cog_dir),
+            Commit { id } => command::experiment_cmd::commit(store, id, cog_dir),
+            Discard { id } => command::experiment_cmd::discard(id, cog_dir),
+            List => command::experiment_cmd::list(cog_dir),
+            Save { id } => command::experiment_cmd::save(id, cog_dir),
+            Load { id } => command::experiment_cmd::load(id, cog_dir),
+        }
+    }
+
+    fn run_backup(&self, action: &BackupAction, store: &SqliteRepository) -> Result<CommandOutput> {
+        let mgr = BackupManager::new(&self.db_path());
+        use BackupAction::*;
+        match action {
+            Create { name } => command::backup_cmd::create(store, &mgr, name.clone()),
+            List => command::backup_cmd::list(&mgr),
+            Restore { name } => command::backup_cmd::restore(&mgr, name),
+            Drop { name } => command::backup_cmd::drop(&mgr, name),
+        }
+    }
+
+    fn apply_workflow_then_save(
+        &self,
+        wf: &mut WorkflowState,
+        cog_dir: &Path,
+        result: Result<CommandOutput>,
+    ) -> Result<CommandOutput> {
+        let _ = wf.save(cog_dir);
         result
     }
 }

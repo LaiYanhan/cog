@@ -18,8 +18,6 @@ pub fn execute(
     scan_path: Option<&Path>,
     output: OutputFormat,
 ) -> Result<CommandOutput> {
-    let mut issues = Vec::new();
-    let mut cleaned: usize = 0;
     let all_entities = repo.list_entities()?;
     let scope_prefix = scope.unwrap_or_default();
 
@@ -36,7 +34,61 @@ pub fn execute(
         .collect();
     let checked_count = entities.len();
 
-    for entity in &entities {
+    let (issues, cleaned) =
+        check_entity_structural_issues(repo, &entities, &all_model_names, clean)?;
+
+    let (stale_names, unmodeled_count, scan_issues) =
+        check_scan_diff(repo, scan_path, scope_prefix, &all_model_names, clean)?;
+
+    repo.append_changelog(
+        ChangelogAction::Verify,
+        scope.unwrap_or("*"),
+        &format!("issues={}", issues.len()),
+    )?;
+
+    let stale_count = stale_names.len();
+    let has_scan_diff = unmodeled_count > 0 || stale_count > 0;
+    let scan_cleaned = clean && stale_count > 0;
+
+    let success = issues.is_empty()
+        || (issues
+            .iter()
+            .all(|i| i.kind == VerificationIssueKind::IsolatedEntity)
+            && cleaned > 0);
+
+    // Success condition for scan results:
+    // - No scan diff at all → ok
+    // - Only unmodeled (advisory) but no stale → still ok
+    // - Any stale entity → failure
+    let overall_ok = success && (!has_scan_diff || (unmodeled_count > 0 && stale_count == 0))
+        || (success && scan_cleaned);
+
+    let total_cleaned = cleaned + if clean { stale_count } else { 0 };
+    let report = VerificationReport {
+        checked_count,
+        issues,
+        cleaned_count: total_cleaned,
+        scan_issues,
+        success: overall_ok,
+    };
+
+    let exit_code: i32 = if overall_ok { 0 } else { 1 };
+    Ok(CommandOutput::with_exit_code(
+        format::emit_report(&report, output),
+        exit_code,
+    ))
+}
+
+fn check_entity_structural_issues(
+    repo: &dyn Repository,
+    entities: &[&crate::domain::Entity],
+    all_model_names: &HashSet<&str>,
+    clean: bool,
+) -> Result<(Vec<VerificationIssue>, usize)> {
+    let mut issues = Vec::new();
+    let mut cleaned: usize = 0;
+
+    for entity in entities {
         let assertions = repo.get_assertions_for_entity(&entity.id)?;
         let relation_count = repo.count_relations_for_entity(&entity.id)?;
 
@@ -110,7 +162,7 @@ pub fn execute(
                         assertion_id: Some(assertion.id.clone()),
                         detail: format!(
                             "depends on retracted assertion {}",
-                            crate::format::short_id(&dependency.id)
+                            crate::domain::short_id(&dependency.id)
                         ),
                     });
                 } else if dependency.status == AssertionStatus::Uncertain {
@@ -120,7 +172,7 @@ pub fn execute(
                         assertion_id: Some(assertion.id.clone()),
                         detail: format!(
                             "depends on uncertain assertion {}",
-                            crate::format::short_id(&dependency.id)
+                            crate::domain::short_id(&dependency.id)
                         ),
                     });
                 }
@@ -128,7 +180,16 @@ pub fn execute(
         }
     }
 
-    // Scan diff: compare model against actual code
+    Ok((issues, cleaned))
+}
+
+fn check_scan_diff(
+    repo: &dyn Repository,
+    scan_path: Option<&Path>,
+    scope_prefix: &str,
+    all_model_names: &HashSet<&str>,
+    clean: bool,
+) -> Result<(Vec<String>, usize, Vec<String>)> {
     let mut unmodeled_count: usize = 0;
     let mut stale_names: Vec<String> = Vec::new();
 
@@ -199,70 +260,41 @@ pub fn execute(
         }
     }
 
-    repo.append_changelog(
-        ChangelogAction::Verify,
-        scope.unwrap_or("*"),
-        &format!("issues={}", issues.len()),
-    )?;
+    let scan_issues = build_scan_diff_messages(unmodeled_count, &stale_names, clean);
 
+    Ok((stale_names, unmodeled_count, scan_issues))
+}
+
+fn build_scan_diff_messages(
+    unmodeled_count: usize,
+    stale_names: &[String],
+    clean: bool,
+) -> Vec<String> {
     let stale_count = stale_names.len();
-    let has_scan_diff = unmodeled_count > 0 || stale_count > 0;
-    let scan_cleaned = clean && stale_count > 0;
-
-    let success = issues.is_empty()
-        || (issues
-            .iter()
-            .all(|i| i.kind == VerificationIssueKind::IsolatedEntity)
-            && cleaned > 0);
-
-    // Success condition for scan results:
-    // - No scan diff at all → ok
-    // - Only unmodeled (advisory) but no stale → still ok
-    // - Any stale entity → failure
-    let overall_ok = success && (!has_scan_diff || (unmodeled_count > 0 && stale_count == 0))
-        || (success && scan_cleaned);
-
-    // Build scan diff messages
     let mut scan_issues = Vec::new();
-    if has_scan_diff {
-        if unmodeled_count > 0 {
-            scan_issues.push(format!(
-                "Scan diff: {} unmodeled definition(s) not in model (run cog init to add)",
-                unmodeled_count,
-            ));
-        }
-        if stale_count > 0 && !clean {
-            scan_issues.push(format!(
-                "Scan diff: {} stale auto-scanned {} no longer in code (run cog verify --scan --clean to remove)",
-                stale_count,
-                entities_word(stale_count),
-            ));
-            for name in &stale_names {
-                scan_issues.push(format!("  - {name}"));
-            }
-        } else if stale_count > 0 && clean {
-            scan_issues.push(format!(
-                "Scan diff: cleaned {} stale auto-scanned {}",
-                stale_count,
-                entities_word(stale_count),
-            ));
-        }
+    if unmodeled_count > 0 {
+        scan_issues.push(format!(
+            "Scan diff: {} unmodeled definition(s) not in model (run cog init to add)",
+            unmodeled_count,
+        ));
     }
-
-    let total_cleaned = cleaned + if clean { stale_count } else { 0 };
-    let report = VerificationReport {
-        checked_count,
-        issues,
-        cleaned_count: total_cleaned,
-        scan_issues,
-        success: overall_ok,
-    };
-
-    let exit_code: i32 = if overall_ok { 0 } else { 1 };
-    Ok(CommandOutput::with_exit_code(
-        format::emit_report(&report, output),
-        exit_code,
-    ))
+    if stale_count > 0 && !clean {
+        scan_issues.push(format!(
+            "Scan diff: {} stale auto-scanned {} no longer in code (run cog verify --scan --clean to remove)",
+            stale_count,
+            entities_word(stale_count),
+        ));
+        for name in stale_names {
+            scan_issues.push(format!("  - {name}"));
+        }
+    } else if stale_count > 0 && clean {
+        scan_issues.push(format!(
+            "Scan diff: cleaned {} stale auto-scanned {}",
+            stale_count,
+            entities_word(stale_count),
+        ));
+    }
+    scan_issues
 }
 
 /// Returns "entity" for count 1, "entities" otherwise.

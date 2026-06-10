@@ -62,10 +62,6 @@ impl SyncContext {
         }
     }
 
-    fn inc_kind(&mut self, kind: EntityKind) {
-        *self.kind_counts.entry(kind.to_string()).or_default() += 1;
-    }
-
     fn get_kind(&self, kind: EntityKind) -> usize {
         self.kind_counts
             .get(kind.to_string().as_str())
@@ -112,15 +108,15 @@ impl SyncContext {
         all_dirs.dedup();
 
         for dir_qname in &all_dirs {
-            let entity = repo.upsert_entity(dir_qname, EntityKind::Module, EntityOrigin::Scan)?;
+            let entity_id = upsert_and_track(self, repo, dir_qname, EntityKind::Module)?;
             self.dir_entities
-                .insert(dir_qname.clone(), entity.id.clone());
+                .insert(dir_qname.clone(), entity_id.clone());
 
             if let Some(parent) = parent_qname(dir_qname)
                 && !parent.is_empty()
                 && let Some(parent_id) = self.dir_entities.get(parent)
             {
-                repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+                repo.add_entity_relation(parent_id, &entity_id, EntityRelationKind::Contains)?;
                 self.contains_count += 1;
             }
         }
@@ -141,9 +137,9 @@ impl SyncContext {
                 .unwrap_or(&file_scan.path);
             let file_qname = path_to_qualified(rel);
 
-            let entity = repo.upsert_entity(&file_qname, EntityKind::Module, EntityOrigin::Scan)?;
+            let entity_id = upsert_and_track(self, repo, &file_qname, EntityKind::Module)?;
             self.file_entities
-                .insert(file_qname.clone(), entity.id.clone());
+                .insert(file_qname.clone(), entity_id.clone());
 
             if let Some(parent_rel) = rel.parent() {
                 let pqname = path_to_qualified(parent_rel);
@@ -153,7 +149,7 @@ impl SyncContext {
                         .get(&pqname)
                         .or_else(|| self.file_entities.get(&pqname))
                 {
-                    repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+                    repo.add_entity_relation(parent_id, &entity_id, EntityRelationKind::Contains)?;
                     self.contains_count += 1;
                 }
             }
@@ -170,11 +166,10 @@ impl SyncContext {
         scan_root: &std::path::Path,
     ) -> Result<()> {
         for def in definitions {
-            let entity = repo.upsert_entity(&def.qualified_name, def.kind, EntityOrigin::Scan)?;
+            let entity_id = upsert_and_track(self, repo, &def.qualified_name, def.kind)?;
             self.def_entity_ids
-                .insert(def.qualified_name.clone(), entity.id.clone());
+                .insert(def.qualified_name.clone(), entity_id.clone());
             self.def_count += 1;
-            self.inc_kind(def.kind);
 
             // Determine parent: explicit parent field, or fall back to containing file
             let pqname = def
@@ -212,7 +207,7 @@ impl SyncContext {
                     .get(pqname)
                     .or_else(|| self.file_entities.get(pqname))
             {
-                repo.add_entity_relation(parent_id, &entity.id, EntityRelationKind::Contains)?;
+                repo.add_entity_relation(parent_id, &entity_id, EntityRelationKind::Contains)?;
                 self.contains_count += 1;
             }
         }
@@ -315,6 +310,16 @@ impl SyncContext {
 
 // Standalone phase functions
 
+/// Shared helper: upsert a Scan-origin entity and return its id.
+fn upsert_and_track(
+    _ctx: &SyncContext,
+    repo: &dyn Repository,
+    qname: &str,
+    kind: EntityKind,
+) -> Result<String> {
+    let entity = repo.upsert_entity(qname, kind, EntityOrigin::Scan)?;
+    Ok(entity.id)
+}
 /// Build the set of all qualified names that exist in the current scan,
 /// including definitions, files, and directory ancestors.
 fn collect_scanned_names(result: &ScanReport, scan_root: &std::path::Path) -> HashSet<String> {
