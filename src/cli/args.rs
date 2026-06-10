@@ -63,6 +63,12 @@ pub struct AssertArgs {
     /// ID of another assertion this depends on
     #[arg(long)]
     pub depends_on: Option<String>,
+    /// Retract existing active assertions of same kind on this entity before creating
+    #[arg(long, conflicts_with = "force")]
+    pub replace: bool,
+    /// Create alongside existing active assertions of same kind (use for independent aspects)
+    #[arg(long, conflicts_with = "replace")]
+    pub force: bool,
 }
 
 #[derive(Debug, Args)]

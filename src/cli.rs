@@ -169,12 +169,16 @@ impl Cli {
             Commands::Assert(args) => {
                 let out = command::assert_cmd::execute(
                     store,
-                    &args.entity,
-                    args.kind,
-                    &args.claim,
-                    &args.grounds,
-                    args.depends_on.as_deref(),
-                    self.output,
+                    command::assert_cmd::AssertInput {
+                        entity: &args.entity,
+                        kind: args.kind,
+                        claim: &args.claim,
+                        grounds: &args.grounds,
+                        depends_on: args.depends_on.as_deref(),
+                        replace: args.replace,
+                        force: args.force,
+                        output: self.output,
+                    },
                 )?;
                 wf.transition_explore();
                 Ok(out)
