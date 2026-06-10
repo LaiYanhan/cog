@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::domain::RiskAssessment;
 use crate::domain::{
     AffectedAssertion, Assertion, AssertionStatus, CascadeReason, CascadeReport, Evidence,
 };
 use crate::repo::Repository;
 use crate::space::StructureSpace;
-use crate::space::risk::RiskAssessment;
 use anyhow::Result;
 
 // ---------------------------------------------------------------------------

@@ -3,8 +3,6 @@ pub mod text;
 
 pub use text::TextRenderer;
 
-use crate::domain::*;
-
 /// Output format for CLI.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OutputFormat {
@@ -23,25 +21,4 @@ pub fn emit_report<T: serde::Serialize + Renderable>(report: &T, format: OutputF
         OutputFormat::Text => report.render_text(),
         OutputFormat::Json => json::JsonRender::render(report),
     }
-}
-
-// Free function re-exports for backward compatibility with command modules.
-pub fn short_id(id: &str) -> &str {
-    TextRenderer::short_id(id)
-}
-pub fn assertion_created(
-    assertion: &Assertion,
-    entity: &Entity,
-    existing_assertions: &[(Assertion, Vec<Evidence>)],
-    same_kind_count: usize,
-) -> String {
-    TextRenderer::assertion_created(assertion, entity, existing_assertions, same_kind_count)
-}
-pub fn dependency_report(
-    from: &Entity,
-    to: &Entity,
-    kind: EntityRelationKind,
-    related: &[crate::domain::RelatedEntity],
-) -> String {
-    TextRenderer::dependency_report(from, to, kind, related)
 }

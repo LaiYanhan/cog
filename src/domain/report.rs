@@ -105,7 +105,7 @@ pub struct ImpactCard {
     /// Assertion count per downstream entity (same order as downstream_entities).
     pub downstream_assertion_counts: Vec<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub risk_assessment: Option<crate::space::risk::RiskAssessment>,
+    pub risk_assessment: Option<crate::domain::RiskAssessment>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub downstream_coverage: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]

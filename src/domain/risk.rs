@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Risk assessment for modifying an entity.
 ///
-/// Produced by [`SemanticSpace::assess_risk`](super::SemanticSpace::assess_risk),
+/// Produced by [`SemanticSpace::assess_risk`](crate::space::SemanticSpace::assess_risk),
 /// considering fan-in, active assertions, fragility assertions, and
 /// downstream dependencies.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
