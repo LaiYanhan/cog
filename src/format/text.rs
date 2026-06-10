@@ -713,6 +713,63 @@ impl TextRenderer {
 
         out
     }
+    /// Render scout suggestions compactly: blind entities collapsed to count + sample.
+    pub fn render_scouts(scouts: &[ScoutSuggestion]) -> String {
+        let mut out = String::new();
+        if scouts.is_empty() {
+            return out;
+        }
+        let _ = writeln!(out, "\nScout before implementing:");
+
+        // Render read/verify scouts individually (they carry unique info).
+        for s in scouts {
+            if s.action != ScoutAction::Assert {
+                let tag = match s.action {
+                    ScoutAction::Read => "read",
+                    ScoutAction::Verify => "verify",
+                    _ => unreachable!(),
+                };
+                let _ = writeln!(
+                    out,
+                    "  [{}] {} [{}] — {}",
+                    tag, s.entity_name, s.entity_kind, s.reason
+                );
+            }
+        }
+
+        // Collapse blind [assert] entries to count + sample.
+        let blind: Vec<&ScoutSuggestion> = scouts
+            .iter()
+            .filter(|s| s.action == ScoutAction::Assert)
+            .collect();
+        if !blind.is_empty() {
+            let sample_max = 4usize;
+            let sample_names: Vec<&str> = blind
+                .iter()
+                .take(sample_max)
+                .map(|s| s.entity_name.as_str())
+                .collect();
+            if blind.len() <= sample_max {
+                let _ = writeln!(
+                    out,
+                    "  [assert] {} blind entities: {}",
+                    blind.len(),
+                    sample_names.join(", ")
+                );
+            } else {
+                let remaining = blind.len() - sample_max;
+                let _ = writeln!(
+                    out,
+                    "  [assert] {} blind entities, e.g. {} ... and {} more",
+                    blind.len(),
+                    sample_names.join(", "),
+                    remaining
+                );
+            }
+        }
+
+        out
+    }
 }
 
 // ── Renderable impls ──────────────────────────────────────────────────────

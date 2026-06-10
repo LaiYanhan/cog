@@ -181,20 +181,8 @@ pub fn evaluate(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
     }
 
     let scouts = generate_scout_suggestions(&report);
-    if !scouts.is_empty() {
-        text.push_str("\nScout before implementing:\n");
-        for s in &scouts {
-            let tag = match s.action {
-                ScoutAction::Read => "read",
-                ScoutAction::Assert => "assert",
-                ScoutAction::Verify => "verify",
-            };
-            text.push_str(&format!(
-                "  [{}] {} [{}] — {}\n",
-                tag, s.entity_name, s.entity_kind, s.reason
-            ));
-        }
-    }
+    let scout_text = crate::format::TextRenderer::render_scouts(&scouts);
+    text.push_str(&scout_text);
 
     let _ = std::fmt::Write::write_fmt(
         &mut text,
@@ -327,19 +315,10 @@ pub fn report(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
         }
     }
     let scouts = generate_scout_suggestions(&report);
-    if !scouts.is_empty() {
+    let scout_text = crate::format::TextRenderer::render_scouts(&scouts);
+    if !scout_text.is_empty() {
         text.push_str("scout suggestions:\n");
-        for s in &scouts {
-            text.push_str(&format!(
-                "  [{}] {}\n",
-                match s.action {
-                    ScoutAction::Read => "read",
-                    ScoutAction::Assert => "assert",
-                    ScoutAction::Verify => "verify",
-                },
-                s.entity_name,
-            ));
-        }
+        text.push_str(&scout_text);
     }
     Ok(CommandOutput::success(text))
 }
@@ -400,21 +379,20 @@ pub fn try_experiment(repo: &dyn Repository, args: &TryArgs<'_>) -> Result<Comma
         ),
     );
 
-    let scouts = generate_scout_suggestions(&report);
-    if !scouts.is_empty() {
-        text.push_str("\nScout before implementing:\n");
-        for s in &scouts {
-            let tag = match s.action {
-                ScoutAction::Read => "read",
-                ScoutAction::Assert => "assert",
-                ScoutAction::Verify => "verify",
-            };
-            text.push_str(&format!(
-                "  [{}] {} [{}] — {}\n",
-                tag, s.entity_name, s.entity_kind, s.reason
-            ));
+    // Show the actual affected assertions (not just count)
+    if !report.affected_assertions.is_empty() {
+        text.push_str("\nAffected:\n");
+        for a in &report.affected_assertions {
+            let _ = std::fmt::Write::write_fmt(
+                &mut text,
+                format_args!("  - {}: \"{}\"\n", &a.assertion.id[..8], a.assertion.claim),
+            );
         }
     }
+
+    let scouts = generate_scout_suggestions(&report);
+    let scout_text = crate::format::TextRenderer::render_scouts(&scouts);
+    text.push_str(&scout_text);
 
     let _ = std::fmt::Write::write_fmt(
         &mut text,
