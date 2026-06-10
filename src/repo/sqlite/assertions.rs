@@ -109,7 +109,7 @@ impl SqliteRepository {
             .conn
             .prepare(
                 "SELECT id, entity_id, kind, claim, status, created_at, updated_at, retraction_reason \
-                 FROM assertions WHERE entity_id = ?1 ORDER BY created_at",
+                 FROM assertions WHERE entity_id = ?1 ORDER BY created_at DESC",
             )
             .context("failed to prepare get_assertions_for_entity statement")?;
 
@@ -134,7 +134,7 @@ impl SqliteRepository {
         let placeholders: Vec<String> = (0..entity_ids.len()).map(|_| "?".to_string()).collect();
         let sql = format!(
             "SELECT id, entity_id, kind, claim, status, created_at, updated_at, retraction_reason \
-             FROM assertions WHERE entity_id IN ({}) ORDER BY created_at",
+             FROM assertions WHERE entity_id IN ({}) ORDER BY created_at DESC",
             placeholders.join(", ")
         );
         let mut stmt = self
