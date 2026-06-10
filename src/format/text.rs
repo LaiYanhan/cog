@@ -200,9 +200,9 @@ impl TextRenderer {
             let _ = writeln!(
                 out,
                 "  Dependents: {} entities ({} covered, {} blind)",
-                risk.downstream_count,
-                (risk.downstream_count as f64 * risk.downstream_coverage) as usize,
-                risk.unmodeled_downstream
+                result.downstream_entities.len(),
+                result.downstream_entities.len() - result.blind_downstream.unwrap_or(0),
+                result.blind_downstream.unwrap_or(0)
             );
             let _ = writeln!(
                 out,
