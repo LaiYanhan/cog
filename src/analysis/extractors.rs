@@ -103,12 +103,13 @@ pub(crate) fn walk_for_calls(
     extract: CallExtractor,
 ) {
     if let Some(callee) = extract(node, source)
-        && !callee.is_empty() {
-            calls.push(Call {
-                callee_name: callee,
-                caller_qname: caller_qname.to_string(),
-            });
-        }
+        && !callee.is_empty()
+    {
+        calls.push(Call {
+            callee_name: callee,
+            caller_qname: caller_qname.to_string(),
+        });
+    }
     let mut cur = node.walk();
     for child in node.children(&mut cur) {
         walk_for_calls(&child, source, caller_qname, calls, extract);
