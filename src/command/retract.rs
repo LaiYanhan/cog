@@ -3,30 +3,30 @@ use anyhow::{Result, anyhow};
 use crate::command::CommandOutput;
 use crate::domain::StatusMessage;
 use crate::format::{self, OutputFormat, TextRenderer};
-use crate::repo::{Repository, SqliteRepository};
+use crate::repo::Repository;
 use crate::space::CascadeEngine;
 
 pub fn execute(
-    store: &SqliteRepository,
+    repo: &dyn Repository,
     id: &str,
     reason: &str,
     output: OutputFormat,
 ) -> Result<CommandOutput> {
-    let resolved = store.resolve_assertion_id(id)?;
-    let result = CascadeEngine::retract(store, &resolved, reason)?;
+    let resolved = repo.resolve_assertion_id(id)?;
+    let result = CascadeEngine::retract(repo, &resolved, reason)?;
 
     // Gather entity name and remaining active assertions with evidence
-    let entity = store
+    let entity = repo
         .get_entity(&result.retracted.entity_id)?
         .ok_or_else(|| anyhow!("entity not found: {}", result.retracted.entity_id))?;
     let entity_name = entity.qualified_name.clone();
 
-    let raw_assertions = store.get_assertions_for_entity(&entity.id)?;
+    let raw_assertions = repo.get_assertions_for_entity(&entity.id)?;
     // Only show non-retracted assertions (Active + Uncertain) in the remaining list
     let mut remaining: Vec<(crate::domain::Assertion, Vec<crate::domain::Evidence>)> = Vec::new();
     for a in &raw_assertions {
         if a.status != crate::domain::AssertionStatus::Retracted {
-            let ev = store.get_evidence_for_assertion(&a.id)?;
+            let ev = repo.get_evidence_for_assertion(&a.id)?;
             remaining.push((a.clone(), ev));
         }
     }

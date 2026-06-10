@@ -4,7 +4,8 @@ use anyhow::Result;
 
 use crate::command::CommandOutput;
 use crate::domain::grounds::Grounds;
-use crate::domain::{AssertionKind, ChangelogAction, EntityKind, EntityOrigin, StatusMessage};
+use crate::domain::{AssertionKind, ChangelogAction, StatusMessage};
+use crate::format::TextRenderer;
 use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
 
@@ -75,7 +76,7 @@ fn enforce_kind_gate(
     for a in &active_same_kind {
         let _ = std::fmt::Write::write_fmt(
             &mut msg,
-            format_args!("  {}: \"{}\"\n", &a.id[..8], a.claim),
+            format_args!("  {}: \"{}\"\n", crate::domain::short_id(&a.id), a.claim),
         );
     }
     msg.push_str(
@@ -92,17 +93,21 @@ fn format_created_message(
     retracted_ids: &[String],
 ) -> String {
     if retracted_ids.is_empty() {
-        return format::assertion_created(assertion, entity, existing, same_kind_count);
+        return TextRenderer::assertion_created(assertion, entity, existing, same_kind_count);
     }
     let mut msg = format!(
         "Created {} [{}] on {}\n  \"{}\"\n\n",
-        &assertion.id[..8],
+        crate::domain::short_id(&assertion.id),
         assertion.kind,
         entity.qualified_name,
         assertion.claim
     );
     for rid in retracted_ids {
-        let _ = writeln!(&mut msg, "Auto-retracted {} (replaced).", &rid[..8]);
+        let _ = writeln!(
+            &mut msg,
+            "Auto-retracted {} (replaced).",
+            crate::domain::short_id(rid)
+        );
     }
     msg
 }
@@ -120,11 +125,7 @@ pub fn execute(repo: &dyn Repository, input: AssertInput<'_>) -> Result<CommandO
 
     let entity = match repo.resolve_entity(input.entity) {
         Ok(e) => e,
-        Err(_) => repo.upsert_entity(
-            input.entity,
-            EntityKind::infer(input.entity),
-            EntityOrigin::Manual,
-        )?,
+        Err(_) => repo.ensure_manual_entity(input.entity)?,
     };
 
     let retracted_ids =

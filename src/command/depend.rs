@@ -1,7 +1,8 @@
 use anyhow::Result;
 
 use crate::command::CommandOutput;
-use crate::domain::{ChangelogAction, EntityKind, EntityOrigin, EntityRelationKind, StatusMessage};
+use crate::domain::{ChangelogAction, EntityRelationKind, StatusMessage};
+use crate::format::TextRenderer;
 use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
 
@@ -12,8 +13,8 @@ pub fn execute(
     kind: EntityRelationKind,
     output: OutputFormat,
 ) -> Result<CommandOutput> {
-    let left = repo.upsert_entity(entity_a, EntityKind::infer(entity_a), EntityOrigin::Manual)?;
-    let right = repo.upsert_entity(entity_b, EntityKind::infer(entity_b), EntityOrigin::Manual)?;
+    let left = repo.ensure_manual_entity(entity_a)?;
+    let right = repo.ensure_manual_entity(entity_b)?;
 
     repo.add_entity_relation(&left.id, &right.id, kind)?;
     repo.append_changelog(
@@ -26,7 +27,7 @@ pub fn execute(
     )?;
 
     let related = repo.get_related_entities(&left.id)?;
-    let msg = format::dependency_report(&left, &right, kind, &related);
+    let msg = TextRenderer::dependency_report(&left, &right, kind, &related);
     Ok(CommandOutput::success(format::emit_report(
         &StatusMessage { message: msg },
         output,

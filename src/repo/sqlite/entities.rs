@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -70,6 +70,32 @@ impl SqliteRepository {
             .context("failed to fetch entity by name")?
             .map(|(id, name, kind, origin, metrics_json, ts)| map_entity_row(id, name, kind, origin, metrics_json, ts))
             .transpose()
+    }
+
+    pub(super) fn resolve_entity(&self, name: &str) -> Result<Entity> {
+        if let Some(entity) = self.get_entity_by_name(name)? {
+            return Ok(entity);
+        }
+        let candidates = self.find_entities_by_suffix(name)?;
+        match candidates.len() {
+            0 => bail!("entity not found: {name}"),
+            1 => Ok(candidates.into_iter().next().unwrap()),
+            _ => {
+                let names: Vec<&str> = candidates
+                    .iter()
+                    .map(|e| e.qualified_name.as_str())
+                    .take(5)
+                    .collect();
+                bail!(
+                    "entity not found: {name}\n  Did you mean one of these?\n{}",
+                    names
+                        .iter()
+                        .map(|n| format!("    - {n}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
+        }
     }
 
     pub(super) fn list_entities(&self) -> Result<Vec<Entity>> {

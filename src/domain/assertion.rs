@@ -16,6 +16,10 @@ pub struct Assertion {
     pub retraction_reason: Option<String>,
 }
 
+/// Return the first 8 characters of an ID string for display.
+pub fn short_id(id: &str) -> &str {
+    if id.len() >= 8 { &id[..8] } else { id }
+}
 impl Assertion {
     pub fn short_id(&self) -> &str {
         if self.id.len() >= 8 {

@@ -11,6 +11,12 @@ pub trait Repository {
     // ── Entity ──────────────────────────────────────────────────────────────
 
     fn upsert_entity(&self, name: &str, kind: EntityKind, origin: EntityOrigin) -> Result<Entity>;
+
+    /// Ensure a manually-created entity exists, inferring its [`EntityKind`].
+    fn ensure_manual_entity(&self, name: &str) -> Result<Entity> {
+        let kind = EntityKind::infer(name);
+        self.upsert_entity(name, kind, EntityOrigin::Manual)
+    }
     fn get_entity(&self, id: &str) -> Result<Option<Entity>>;
     fn get_entity_by_name(&self, name: &str) -> Result<Option<Entity>>;
     /// Resolve an entity by exact qualified name, falling back to suffix matching.

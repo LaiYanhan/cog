@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow, bail};
 
 use crate::domain::*;
-use crate::repo::{Repository, SqliteRepository};
+use crate::repo::Repository;
 use crate::space::SemanticSpace;
 
 pub struct CascadeEngine;
@@ -14,7 +14,7 @@ impl CascadeEngine {
     ///   1. Load semantic sub-space → simulate cascade in pure memory
     ///   2. Apply the computed changes to the real database
     pub fn retract(
-        repo: &SqliteRepository,
+        repo: &dyn Repository,
         assertion_id: &str,
         reason: &str,
     ) -> Result<CascadeReport> {
@@ -39,19 +39,15 @@ impl CascadeEngine {
         // Phase 1: Load semantic space to verify assertion context.
         let _semantic = SemanticSpace::load(repo, &entity_id)?;
 
-        let affected = repo.transaction(|| {
-            // Retract the target assertion
-            repo.retract_assertion(assertion_id, reason)?;
-            repo.append_changelog(ChangelogAction::Retract, assertion_id, reason)?;
+        // Retract the target assertion
+        repo.retract_assertion(assertion_id, reason)?;
+        repo.append_changelog(ChangelogAction::Retract, assertion_id, reason)?;
 
-            // Phase 2: Apply cascade using simulation results
-            // We do the BFS here because we need live repo state for
-            // the "independent active dependency" check that simulation
-            // doesn't capture (the simulation only knows about loaded edges).
-            let affected = Self::apply_cascade(repo, assertion_id)?;
-
-            Ok(affected)
-        })?;
+        // Phase 2: Apply cascade using simulation results
+        // We do the BFS here because we need live repo state for
+        // the "independent active dependency" check that simulation
+        // doesn't capture (the simulation only knows about loaded edges).
+        let affected = Self::apply_cascade(repo, assertion_id)?;
 
         Ok(CascadeReport {
             retracted,
@@ -62,10 +58,7 @@ impl CascadeEngine {
     /// BFS cascade: for each dependent, check if it has independent active
     /// dependencies. If yes → GroundWeakened (still has ground). If no →
     /// MarkedUncertain (lost all ground) and enqueue for further propagation.
-    fn apply_cascade(
-        repo: &SqliteRepository,
-        retracted_id: &str,
-    ) -> Result<Vec<AffectedAssertion>> {
+    fn apply_cascade(repo: &dyn Repository, retracted_id: &str) -> Result<Vec<AffectedAssertion>> {
         use std::collections::{HashSet, VecDeque};
 
         let mut queue = VecDeque::from([retracted_id.to_string()]);

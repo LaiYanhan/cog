@@ -8,9 +8,10 @@ pub mod grounds;
 pub mod metrics;
 pub mod relations;
 pub mod report;
+pub mod risk;
 
 // Re-export core types for convenience
-pub use assertion::{Assertion, AssertionKind, AssertionStatus};
+pub use assertion::{Assertion, AssertionKind, AssertionStatus, short_id};
 pub use changelog::{ChangelogAction, ChangelogEntry};
 pub use entity::{Entity, EntityKind, EntityOrigin, parent_qname};
 pub use evidence::Evidence;
@@ -25,3 +26,4 @@ pub use report::{
     TopUncovered, TraceAssertion, TraceTree, VerificationIssue, VerificationIssueKind,
     VerificationReport,
 };
+pub use risk::RiskAssessment;
