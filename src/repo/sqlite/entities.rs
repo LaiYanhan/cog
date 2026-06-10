@@ -265,26 +265,94 @@ impl SqliteRepository {
     }
 
     /// Find entities whose qualified name ends with `::{short_name}`.
+    ///
+    /// Also normalises Python-style `.` separators to `::` so that
+    /// `Example.__init__` matches `...::Example::__init__`.
     /// Used for fuzzy resolution when exact match fails.
     pub(super) fn find_entities_by_suffix(&self, short_name: &str) -> Result<Vec<Entity>> {
         let pattern = format!("%::{}", short_name);
+        // Normalise Python-style dots to :: so Example.__init__
+        // matches qualified names ending in ::Example::__init__
+        let normalized = short_name.replace('.', "::");
+        let norm_pattern = format!("%::{}", normalized);
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT id, qualified_name, kind, origin, metrics_json, created_at \
                  FROM entities WHERE qualified_name LIKE ?1 \
-                 OR qualified_name = ?2 \
+                 OR qualified_name LIKE ?2 \
+                 OR qualified_name = ?3 \
+                 OR qualified_name = ?4 \
                  ORDER BY qualified_name",
             )
             .context("failed to prepare find_entities_by_suffix statement")?;
         let rows = stmt
-            .query_map(params![pattern, short_name], entity_from_query_row)
+            .query_map(
+                params![pattern, norm_pattern, short_name, normalized],
+                entity_from_query_row,
+            )
             .context("failed to execute find_entities_by_suffix query")?;
+        let mut seen = std::collections::HashSet::new();
         let mut results = Vec::new();
         for row in rows {
             let (id, name, kind, origin, metrics_json, ts) = row?;
-            results.push(map_entity_row(id, name, kind, origin, metrics_json, ts)?);
+            // Deduplicate — the same entity may match both patterns
+            if seen.insert(name.clone()) {
+                results.push(map_entity_row(id, name, kind, origin, metrics_json, ts)?);
+            }
         }
         Ok(results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+
+    #[test]
+    fn suffix_match_python_style_name() -> Result<()> {
+        let repo = SqliteRepository::open_in_memory()?;
+        // Sync would create this with :: separators
+        repo.upsert_entity(
+            "src::inline_snapshot::testing::_example::Example::__init__",
+            EntityKind::Method,
+            EntityOrigin::Scan,
+        )?;
+        // Agent might query with Python-style dot notation
+        let results = repo.find_entities_by_suffix("Example.__init__")?;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].qualified_name.contains("Example::__init__"));
+        Ok(())
+    }
+
+    #[test]
+    fn suffix_match_double_colon_name() -> Result<()> {
+        let repo = SqliteRepository::open_in_memory()?;
+        repo.upsert_entity(
+            "cog::repo::sqlite::SqliteRepository",
+            EntityKind::Type,
+            EntityOrigin::Scan,
+        )?;
+        // Original double-colon style still works
+        let results = repo.find_entities_by_suffix("SqliteRepository")?;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].qualified_name.contains("SqliteRepository"));
+        Ok(())
+    }
+
+    #[test]
+    fn suffix_match_deduplicates_across_both_patterns() -> Result<()> {
+        let repo = SqliteRepository::open_in_memory()?;
+        repo.upsert_entity(
+            "a::b::Example::__init__",
+            EntityKind::Method,
+            EntityOrigin::Scan,
+        )?;
+        // Searching for the full last segment should find exactly one
+        let results = repo.find_entities_by_suffix("__init__")?;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].qualified_name.ends_with("::__init__"));
+        Ok(())
     }
 }

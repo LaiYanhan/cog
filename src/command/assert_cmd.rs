@@ -31,8 +31,15 @@ pub fn execute(
     // Validate grounds format before storing
     Grounds::parse(grounds).validate_format()?;
 
-    let entity_record =
-        repo.upsert_entity(entity, EntityKind::infer(entity), EntityOrigin::Manual)?;
+    // Resolve to an existing entity first (suffix match), then fall back
+    // to creating a new Manual entity if nothing matches. This prevents
+    // creating orphan entities when the agent uses a short name like
+    // `Example.__init__` that should map to a synced entity like
+    // `src::...::Example::__init__`.
+    let entity_record = match repo.resolve_entity(entity) {
+        Ok(existing) => existing,
+        Err(_) => repo.upsert_entity(entity, EntityKind::infer(entity), EntityOrigin::Manual)?,
+    };
     let assertion = repo.create_assertion(
         &entity_record.id,
         kind,

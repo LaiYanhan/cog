@@ -51,6 +51,10 @@ pub enum VerificationIssueKind {
     DependencyOnRetracted,
     DependencyOnUncertain,
     DanglingGrounds,
+    /// Manual-origin entity with assertions but no relations —
+    /// likely an orphan from a `cog assert` that used a short name
+    /// before entity resolution was fixed.
+    OrphanManualEntity,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

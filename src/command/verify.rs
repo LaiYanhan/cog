@@ -51,13 +51,28 @@ pub fn execute(
                 assertion_id: None,
                 detail: "entity has no assertions and no relations".to_string(),
             });
-
             if clean {
                 repo.delete_entity(&entity.qualified_name)?;
                 cleaned += 1;
             }
         }
 
+        // Detect orphan Manual-origin entities: they have assertions
+        // (so IsolatedEntity doesn't catch them) but no relations.
+        if entity.origin == crate::domain::EntityOrigin::Manual
+            && relation_count == 0
+            && active_count > 0
+        {
+            issues.push(VerificationIssue {
+                kind: VerificationIssueKind::OrphanManualEntity,
+                entity_name: Some(entity.qualified_name.clone()),
+                assertion_id: None,
+                detail: format!(
+                    "Manual entity with {} active assertion(s) but no relations",
+                    active_count
+                ),
+            });
+        }
         for assertion in &assertions {
             if assertion.status != AssertionStatus::Active {
                 continue;
@@ -293,6 +308,9 @@ mod tests {
             "code:auth::login",
             None,
         )?;
+        // Add a relation so the Manual entity is not flagged as orphan
+        let module = store.upsert_entity("auth", EntityKind::Module, EntityOrigin::Scan)?;
+        store.add_entity_relation(&module.id, &entity.id, EntityRelationKind::Contains)?;
 
         let output = execute(
             &store,
