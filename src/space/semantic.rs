@@ -187,9 +187,22 @@ impl SemanticSpace {
             })
             .count();
 
-        // Count downstream entities from structure space
-        let downstream: Vec<&crate::space::structure::EntityNode> =
-            structure.dependencies_of(entity_id);
+        // Count downstream entities from structure space.
+        // Uses the same edge-filtered logic as the impact BFS:
+        // only Calls + Uses reverse edges (who depends on this entity),
+        // not Contains (structural) edges.
+        let downstream: Vec<&crate::space::structure::EntityNode> = {
+            let mut all = Vec::new();
+            for kind in [
+                crate::domain::EntityRelationKind::Calls,
+                crate::domain::EntityRelationKind::Uses,
+            ] {
+                all.extend(structure.dependents_of_kind(entity_id, kind));
+            }
+            all.sort_by_key(|n| &n.entity.qualified_name);
+            all.dedup_by_key(|n| &n.entity.id);
+            all
+        };
         let downstream_count = downstream.len();
 
         // Compute downstream coverage: ratio of downstream entities that have

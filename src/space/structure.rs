@@ -181,21 +181,17 @@ impl StructureSpace {
 
     // ── Queries ──────────────────────────────────────────────────────────
 
-    /// Entities that directly depend on `entity` (incoming edges).
-    pub fn dependents_of(&self, entity_id: &str) -> Vec<&EntityNode> {
+    /// Entities that directly depend on `entity` via edges of a specific kind
+    /// (incoming edges where `edge.to == entity_id`).
+    pub fn dependents_of_kind(
+        &self,
+        entity_id: &str,
+        kind: EntityRelationKind,
+    ) -> Vec<&EntityNode> {
         self.edges
             .iter()
-            .filter(|e| e.to == entity_id)
+            .filter(|e| e.to == entity_id && e.kind == kind)
             .filter_map(|e| self.entities.get(&e.from))
-            .collect()
-    }
-
-    /// Entities that `entity` directly depends on (outgoing edges).
-    pub fn dependencies_of(&self, entity_id: &str) -> Vec<&EntityNode> {
-        self.edges
-            .iter()
-            .filter(|e| e.from == entity_id)
-            .filter_map(|e| self.entities.get(&e.to))
             .collect()
     }
 }

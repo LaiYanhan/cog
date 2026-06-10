@@ -11,42 +11,53 @@ impl ImpactEngine {
     /// Loads the structure sub-space around the entity, then performs
     /// BFS in pure memory to find all reachable downstream entities
     /// and their associated assertions.
+    ///
+    /// Only follows `Calls` and `Uses` edges in reverse direction
+    /// (who depends on this entity).  `Contains` edges are structural,
+    /// not dependency, so they are excluded from the traversal.
     pub fn analyze(repo: &dyn Repository, entity_name: &str) -> Result<ImpactCard> {
         let entity = repo.resolve_entity(entity_name)?;
 
         // Load structure space — expand wide (depth 0 = unlimited, cap at 500 nodes)
         let structure = StructureSpace::load(repo, &entity, 0, 500)?;
 
-        // BFS in memory to collect all downstream entity IDs
-        let downstream_ids: Vec<String> = {
-            let mut ids = Vec::new();
+        // BFS: only follow Calls + Uses reverse edges (who depends on me).
+        // Contains edges are structural, not dependency, so they're excluded.
+        let (direct_ids, indirect_ids): (Vec<String>, Vec<String>) = {
+            let mut direct = Vec::new();
+            let mut indirect = Vec::new();
             let mut visited = std::collections::HashSet::new();
             let mut queue = std::collections::VecDeque::new();
-            queue.push_back(entity.id.clone());
+            queue.push_back((entity.id.clone(), 0usize));
 
-            while let Some(current_id) = queue.pop_front() {
+            while let Some((current_id, hop)) = queue.pop_front() {
                 if !visited.insert(current_id.clone()) {
                     continue;
                 }
-                // Skip the root entity itself
                 if current_id != entity.id {
-                    ids.push(current_id.clone());
-                }
-                // Expand: entities that depend on current (dependents = incoming edges)
-                for node in structure.dependents_of(&current_id) {
-                    if !visited.contains(&node.entity.id) {
-                        queue.push_back(node.entity.id.clone());
+                    if hop == 1 {
+                        direct.push(current_id.clone());
+                    } else {
+                        indirect.push(current_id.clone());
                     }
                 }
-                // Also expand via dependencies (outgoing edges)
-                for node in structure.dependencies_of(&current_id) {
-                    if !visited.contains(&node.entity.id) {
-                        queue.push_back(node.entity.id.clone());
+                // Only expand via dependency edges (reverse direction)
+                for kind in [EntityRelationKind::Calls, EntityRelationKind::Uses] {
+                    for node in structure.dependents_of_kind(&current_id, kind) {
+                        if !visited.contains(&node.entity.id) {
+                            queue.push_back((node.entity.id.clone(), hop + 1));
+                        }
                     }
                 }
             }
-            ids
+            (direct, indirect)
         };
+
+        let downstream_ids: Vec<String> = direct_ids
+            .iter()
+            .chain(indirect_ids.iter())
+            .cloned()
+            .collect();
 
         // Resolve downstream entities
         let downstream_entities: Vec<Entity> = downstream_ids
@@ -58,7 +69,7 @@ impl ImpactEngine {
         let mut all_entity_ids = vec![entity.id.clone()];
         all_entity_ids.extend(downstream_ids);
 
-        let affected_assertions: Vec<crate::domain::Assertion> = repo
+        let affected_assertions: Vec<Assertion> = repo
             .get_assertions_for_entities(&all_entity_ids)?
             .into_iter()
             .filter(|a| a.status == AssertionStatus::Active)
@@ -93,6 +104,7 @@ impl ImpactEngine {
         } else {
             (None, None)
         };
+
         Ok(ImpactCard {
             entity,
             downstream_entities,

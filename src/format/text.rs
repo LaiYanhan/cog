@@ -199,7 +199,7 @@ impl TextRenderer {
             let _ = writeln!(out, "Risk: {} ({:.2})", label, risk.risk_score);
             let _ = writeln!(
                 out,
-                "  Downstream: {} entities ({} covered, {} blind)",
+                "  Dependents: {} entities ({} covered, {} blind)",
                 risk.downstream_count,
                 (risk.downstream_count as f64 * risk.downstream_coverage) as usize,
                 risk.unmodeled_downstream
@@ -209,24 +209,18 @@ impl TextRenderer {
                 "  Active assertions at stake: {}",
                 risk.active_assertions
             );
-            let _ = writeln!(
-                out,
-                "  WARNING: Risk reflects structural dependencies only."
-            );
-            let _ = writeln!(
-                out,
-                "    Runtime behavior (generators, metaclasses, dynamic dispatch)"
-            );
-            let _ = writeln!(
-                out,
-                "    is NOT captured. Verify blind entities before implementing."
-            );
         }
 
         if !result.downstream_entities.is_empty() {
             let _ = writeln!(out);
-            let _ = writeln!(out, "Downstream:");
-            for (i, entity) in result.downstream_entities.iter().enumerate() {
+            let _ = writeln!(out, "Dependents:");
+            let max_display = 30;
+            for (i, entity) in result
+                .downstream_entities
+                .iter()
+                .take(max_display)
+                .enumerate()
+            {
                 let count = result
                     .downstream_assertion_counts
                     .get(i)
@@ -243,12 +237,20 @@ impl TextRenderer {
                     if count == 1 { "" } else { "s" }
                 );
             }
+            if result.downstream_entities.len() > max_display {
+                let remaining = result.downstream_entities.len() - max_display;
+                let _ = writeln!(out, "  ... and {} more", remaining);
+            }
+        } else {
+            let _ = writeln!(out);
+            let _ = writeln!(out, "No dependents found via Calls / Uses edges.");
+            let _ = writeln!(out, "For structural hierarchy, use: cog query <entity>");
         }
 
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "Next: Test your plan safely: cog experiment try {} --kind correction --claim \"...\" --grounds \"code:{}\" --desc \"...\"",
+            "Next: Test your plan safely: cog experiment try {} --kind correction --claim \\\"...\\\" --grounds \\\"code:{}\\\" --desc \\\"...\\\"",
             result.entity.qualified_name, result.entity.qualified_name
         );
 
