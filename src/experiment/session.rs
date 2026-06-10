@@ -236,15 +236,15 @@ impl Experiment {
                     grounds,
                     depends_on,
                 } => {
-                    // Resolve entity name to id
-                    match repo.get_entity_by_name(entity_name)? {
-                        Some(entity) => {
+                    // Resolve entity name — suffix matching like cog assert uses
+                    match repo.resolve_entity(entity_name) {
+                        Ok(entity) => {
                             let dep = depends_on.as_deref();
                             repo.create_assertion(&entity.id, *kind, claim, grounds, dep)?;
                             applied += 1;
                             details.push(format!("asserted on {entity_name}: {claim}"));
                         }
-                        None => {
+                        Err(_) => {
                             skipped += 1;
                             details.push(format!(
                                 "skipped assertion: entity not found: {entity_name}"
@@ -319,5 +319,103 @@ impl Experiment {
     /// Discard the experiment. Consumes self without side effects.
     pub fn discard(mut self) {
         self.status = ExperimentStatus::Discarded;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repo::SqliteRepository;
+
+    /// Regression: experiment commit must resolve short entity names via suffix
+    /// matching, not exact match. Previously used get_entity_by_name which
+    /// silently skipped assertions for names like "_get_callable_signature"
+    /// when the stored name was "wat::inspection::_get_callable_signature".
+    #[test]
+    fn commit_resolves_short_entity_name() -> Result<()> {
+        let repo = SqliteRepository::open_in_memory()?;
+
+        // Create entity with a fully qualified name (as tree-sitter would)
+        repo.upsert_entity(
+            "wat::inspection::inspection::_get_callable_signature",
+            EntityKind::Function,
+            EntityOrigin::Scan,
+        )?;
+
+        // Build a minimal experiment in Evaluated state
+        let mut exp = Experiment {
+            id: Uuid::new_v4().to_string(),
+            description: "test".into(),
+            entity_focus: "_get_callable_signature".into(),
+            entity_focus_id: String::new(),
+            created_at: Utc::now(),
+            status: ExperimentStatus::Evaluated,
+            ops: vec![ExperimentOp::Assertion {
+                entity_name: "_get_callable_signature".into(),
+                kind: AssertionKind::Contract,
+                claim: "does X".into(),
+                grounds: "code:_get_callable_signature".into(),
+                depends_on: None,
+            }],
+            structure: StructureSpace::default(),
+            semantic: SemanticSpace::default(),
+            boundary_entities: vec![],
+            risk_score: None,
+            affected: vec![],
+            contradictions: vec![],
+            saved: false,
+        };
+        exp.mark_saved();
+
+        let report = exp.commit(&repo)?;
+
+        assert_eq!(report.ops_applied, 1, "should apply, not skip");
+        assert_eq!(report.ops_skipped, 0, "expected zero skips, got: {:?}", report.details);
+
+        // Verify the assertion was actually created on the correct entity
+        let entity = repo.resolve_entity("_get_callable_signature")?;
+        let assertions = repo.get_assertions_for_entity(&entity.id)?;
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].claim, "does X");
+
+        Ok(())
+    }
+
+    /// Verify that truly unknown entities still get skipped.
+    #[test]
+    fn commit_skips_unknown_entity() -> Result<()> {
+        let repo = SqliteRepository::open_in_memory()?;
+
+        let mut exp = Experiment {
+            id: Uuid::new_v4().to_string(),
+            description: "test".into(),
+            entity_focus: "nonexistent".into(),
+            entity_focus_id: String::new(),
+            created_at: Utc::now(),
+            status: ExperimentStatus::Evaluated,
+            ops: vec![ExperimentOp::Assertion {
+                entity_name: "no_such_entity".into(),
+                kind: AssertionKind::Contract,
+                claim: "never stored".into(),
+                grounds: "note:test".into(),
+                depends_on: None,
+            }],
+            structure: StructureSpace::default(),
+            semantic: SemanticSpace::default(),
+            boundary_entities: vec![],
+            risk_score: None,
+            affected: vec![],
+            contradictions: vec![],
+            saved: false,
+        };
+        exp.mark_saved();
+
+        let report = exp.commit(&repo)?;
+
+        assert_eq!(report.ops_applied, 0, "unknown entity should not be applied");
+        assert_eq!(report.ops_skipped, 1);
+        assert!(report.details[0].contains("entity not found"));
+
+        Ok(())
     }
 }
