@@ -45,7 +45,14 @@ fn process_rust_child<'a>(
                     kind: EntityKind::Function,
                     parent: None,
                 });
-                extract_calls_from_body(child, source, &fqname, calls);
+                super::extract_calls_from_body(
+                    child,
+                    source,
+                    &fqname,
+                    calls,
+                    &["block"],
+                    extract_rust_call,
+                );
             }
         }
         "struct_item" | "enum_item" | "trait_item" => {
@@ -129,45 +136,30 @@ fn extract_rust_impl(
                         kind: EntityKind::Method,
                         parent: impl_name.clone(),
                     });
-                    extract_calls_from_body(&inner, source, &fqname, calls);
+                    super::extract_calls_from_body(
+                        &inner,
+                        source,
+                        &fqname,
+                        calls,
+                        &["block"],
+                        extract_rust_call,
+                    );
                 }
             }
         }
     }
 }
 
-/// Walk a function body looking for `call_expression` nodes.
-fn extract_calls_from_body(
-    func_node: &Node,
-    source: &str,
-    caller_qname: &str,
-    calls: &mut Vec<Call>,
-) {
-    let mut cursor = func_node.walk();
-    for child in func_node.children(&mut cursor) {
-        if child.kind() == "block" {
-            walk_for_calls(&child, source, caller_qname, calls);
-            break;
-        }
+fn extract_rust_call(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "call_expression" {
+        return None;
     }
-}
-
-/// Recursively walk an AST subtree looking for `call_expression` nodes.
-fn walk_for_calls(node: &Node, source: &str, caller_qname: &str, calls: &mut Vec<Call>) {
-    if node.kind() == "call_expression"
-        && let Some(func) = node.child_by_field_name("function")
-    {
-        let callee = extract_callee_name(&func, source);
-        if !callee.is_empty() {
-            calls.push(Call {
-                callee_name: callee,
-                caller_qname: caller_qname.to_string(),
-            });
-        }
-    }
-    let mut cur = node.walk();
-    for child in node.children(&mut cur) {
-        walk_for_calls(&child, source, caller_qname, calls);
+    let func = node.child_by_field_name("function")?;
+    let callee = extract_callee_name(&func, source);
+    if callee.is_empty() {
+        None
+    } else {
+        Some(callee)
     }
 }
 

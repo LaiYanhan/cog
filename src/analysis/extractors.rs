@@ -70,6 +70,51 @@ pub(crate) fn node_text(node: &Node, source: &str) -> String {
     node.utf8_text(source.as_bytes()).unwrap_or("").to_owned()
 }
 
+// ── Call extraction helpers (shared across language extractors) ─────────────
+
+type CallExtractor = fn(&Node, &str) -> Option<String>;
+
+/// Walk a function/method body looking for the block node, then delegate to
+/// `walk_for_calls` for recursive call extraction.
+pub(crate) fn extract_calls_from_body(
+    func_node: &Node,
+    source: &str,
+    caller_qname: &str,
+    calls: &mut Vec<Call>,
+    block_kinds: &[&str],
+    extract: CallExtractor,
+) {
+    let mut cursor = func_node.walk();
+    for child in func_node.children(&mut cursor) {
+        if block_kinds.contains(&child.kind()) {
+            walk_for_calls(&child, source, caller_qname, calls, extract);
+            break;
+        }
+    }
+}
+
+/// Recursively walk an AST subtree.  At each node, if `extract` returns a
+/// callee name, record the call and skip deeper recursion into this subtree.
+pub(crate) fn walk_for_calls(
+    node: &Node,
+    source: &str,
+    caller_qname: &str,
+    calls: &mut Vec<Call>,
+    extract: CallExtractor,
+) {
+    if let Some(callee) = extract(node, source)
+        && !callee.is_empty() {
+            calls.push(Call {
+                callee_name: callee,
+                caller_qname: caller_qname.to_string(),
+            });
+        }
+    let mut cur = node.walk();
+    for child in node.children(&mut cur) {
+        walk_for_calls(&child, source, caller_qname, calls, extract);
+    }
+}
+
 // ── Extraction dispatch ───────────────────────────────────────────────────
 
 pub fn extract<'a>(

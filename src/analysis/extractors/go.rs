@@ -24,7 +24,14 @@ pub fn extract_go<'a>(
                         kind: EntityKind::Function,
                         parent: None,
                     });
-                    extract_calls_from_block(&child, source, &fqname, &mut calls);
+                    super::extract_calls_from_body(
+                        &child,
+                        source,
+                        &fqname,
+                        &mut calls,
+                        &["block"],
+                        extract_go_call,
+                    );
                 }
             }
             "method_declaration" => {
@@ -59,7 +66,14 @@ pub fn extract_go<'a>(
                         kind: EntityKind::Method,
                         parent: receiver,
                     });
-                    extract_calls_from_block(&child, source, &fqname, &mut calls);
+                    super::extract_calls_from_body(
+                        &child,
+                        source,
+                        &fqname,
+                        &mut calls,
+                        &["block"],
+                        extract_go_call,
+                    );
                 }
             }
             "type_declaration" => {
@@ -87,41 +101,18 @@ pub fn extract_go<'a>(
     (defs, imports, calls)
 }
 
-/// Walk a function body looking for `call_expression` nodes.
-fn extract_calls_from_block(
-    func_node: &Node,
-    source: &str,
-    caller_qname: &str,
-    calls: &mut Vec<Call>,
-) {
-    let mut cursor = func_node.walk();
-    for child in func_node.children(&mut cursor) {
-        if child.kind() == "block" {
-            walk_for_calls(&child, source, caller_qname, calls);
-            break;
-        }
+fn extract_go_call(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "call_expression" {
+        return None;
+    }
+    let func = node.child_by_field_name("function")?;
+    let callee = extract_callee_name(&func, source);
+    if callee.is_empty() {
+        None
+    } else {
+        Some(callee)
     }
 }
-
-/// Recursively walk an AST subtree looking for `call_expression` nodes.
-fn walk_for_calls(node: &Node, source: &str, caller_qname: &str, calls: &mut Vec<Call>) {
-    if node.kind() == "call_expression"
-        && let Some(func) = node.child_by_field_name("function")
-    {
-        let callee = extract_callee_name(&func, source);
-        if !callee.is_empty() {
-            calls.push(Call {
-                callee_name: callee,
-                caller_qname: caller_qname.to_string(),
-            });
-        }
-    }
-    let mut cur = node.walk();
-    for child in node.children(&mut cur) {
-        walk_for_calls(&child, source, caller_qname, calls);
-    }
-}
-
 /// Extract the simple function/method name from a Go call expression callee.
 /// Handles `foo()`, `obj.Method()`, `pkg.Function()`.
 fn extract_callee_name(func_node: &Node, source: &str) -> String {

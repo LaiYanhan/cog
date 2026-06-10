@@ -25,7 +25,14 @@ pub fn extract_python<'a>(
                         parent: None,
                     });
                     // Extract calls from function body
-                    extract_calls_from_body(&child, source, &fqname, &mut calls);
+                    super::extract_calls_from_body(
+                        &child,
+                        source,
+                        &fqname,
+                        &mut calls,
+                        &["block"],
+                        extract_python_call,
+                    );
                 }
             }
             "class_definition" => {
@@ -114,7 +121,14 @@ fn extract_python_class_methods(
                         parent: Some(class_name.to_owned()),
                     });
                     // Extract calls from method body
-                    extract_calls_from_body(&stmt, source, &fqname, calls);
+                    super::extract_calls_from_body(
+                        &stmt,
+                        source,
+                        &fqname,
+                        calls,
+                        &["block"],
+                        extract_python_call,
+                    );
                 }
             }
             break;
@@ -122,46 +136,18 @@ fn extract_python_class_methods(
     }
 }
 
-/// Walk a function/method body and extract all `call` nodes,
-/// recording just the callee's simple name (not qualified).
-fn extract_calls_from_body(
-    func_node: &Node,
-    source: &str,
-    caller_qname: &str,
-    calls: &mut Vec<Call>,
-) {
-    // Find the block under the function_definition
-    let mut cursor = func_node.walk();
-    for child in func_node.children(&mut cursor) {
-        if child.kind() == "block" {
-            walk_for_calls(&child, source, caller_qname, calls);
-            break;
-        }
+fn extract_python_call(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "call" {
+        return None;
+    }
+    let func = node.child(0)?;
+    let callee = extract_callee_name(&func, source);
+    if callee.is_empty() {
+        None
+    } else {
+        Some(callee)
     }
 }
-
-/// Recursively walk an AST subtree looking for `call` nodes.
-fn walk_for_calls(node: &Node, source: &str, caller_qname: &str, calls: &mut Vec<Call>) {
-    if node.kind() == "call" {
-        // The function being called is the first child (before `argument_list`)
-        if let Some(func) = node.child(0) {
-            let callee = extract_callee_name(&func, source);
-            if !callee.is_empty() {
-                calls.push(Call {
-                    callee_name: callee,
-                    caller_qname: caller_qname.to_string(),
-                });
-            }
-        }
-        // Don't recurse into the callee's own body (nested defs)
-        // — just continue processing siblings.
-    }
-    let mut cur = node.walk();
-    for child in node.children(&mut cur) {
-        walk_for_calls(&child, source, caller_qname, calls);
-    }
-}
-
 /// Extract the simple function/method name from the expression node
 /// that serves as the callable.  Handles:
 ///   `foo()`          → "foo"

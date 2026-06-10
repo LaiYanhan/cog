@@ -42,7 +42,14 @@ pub fn extract_java<'a>(
                         kind: EntityKind::Function,
                         parent: None,
                     });
-                    extract_calls_from_body(&child, source, &fqname, &mut calls);
+                    super::extract_calls_from_body(
+                        &child,
+                        source,
+                        &fqname,
+                        &mut calls,
+                        &["block", "body"],
+                        extract_java_call,
+                    );
                 }
             }
             "import_declaration" => {
@@ -90,7 +97,14 @@ fn extract_java_class_body(
                         kind: EntityKind::Method,
                         parent: Some(class_name.to_owned()),
                     });
-                    extract_calls_from_body(&member, source, &fqname, calls);
+                    super::extract_calls_from_body(
+                        &member,
+                        source,
+                        &fqname,
+                        calls,
+                        &["block", "body"],
+                        extract_java_call,
+                    );
                 } else if member.kind() == "class_declaration"
                     && let Some(name_node) = member.child_by_field_name("name")
                 {
@@ -115,37 +129,15 @@ fn extract_java_class_body(
     }
 }
 
-/// Walk a function body looking for `method_invocation` nodes.
-fn extract_calls_from_body(
-    func_node: &Node,
-    source: &str,
-    caller_qname: &str,
-    calls: &mut Vec<Call>,
-) {
-    let mut cursor = func_node.walk();
-    for child in func_node.children(&mut cursor) {
-        if child.kind() == "block" || child.kind() == "body" {
-            walk_for_calls(&child, source, caller_qname, calls);
-            break;
-        }
+fn extract_java_call(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "method_invocation" {
+        return None;
     }
-}
-
-/// Recursively walk looking for `method_invocation` nodes.
-fn walk_for_calls(node: &Node, source: &str, caller_qname: &str, calls: &mut Vec<Call>) {
-    if node.kind() == "method_invocation"
-        && let Some(name_node) = node.child_by_field_name("name")
-    {
-        let callee = node_text(&name_node, source);
-        if !callee.is_empty() {
-            calls.push(Call {
-                callee_name: callee,
-                caller_qname: caller_qname.to_string(),
-            });
-        }
-    }
-    let mut cur = node.walk();
-    for child in node.children(&mut cur) {
-        walk_for_calls(&child, source, caller_qname, calls);
+    let name_node = node.child_by_field_name("name")?;
+    let callee = super::node_text(&name_node, source);
+    if callee.is_empty() {
+        None
+    } else {
+        Some(callee)
     }
 }

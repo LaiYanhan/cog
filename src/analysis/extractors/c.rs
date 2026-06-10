@@ -25,7 +25,14 @@ pub fn extract_c<'a>(
                             kind: EntityKind::Function,
                             parent: None,
                         });
-                        extract_calls_from_body(&child, source, &fqname, &mut calls);
+                        super::extract_calls_from_body(
+                            &child,
+                            source,
+                            &fqname,
+                            &mut calls,
+                            &["compound_statement"],
+                            extract_c_call,
+                        );
                     }
                 }
             }
@@ -73,41 +80,18 @@ pub fn extract_c<'a>(
     (defs, imports, calls)
 }
 
-/// Walk a function body looking for `call_expression` nodes.
-fn extract_calls_from_body(
-    func_node: &Node,
-    source: &str,
-    caller_qname: &str,
-    calls: &mut Vec<Call>,
-) {
-    let mut cursor = func_node.walk();
-    for child in func_node.children(&mut cursor) {
-        if child.kind() == "compound_statement" {
-            walk_for_calls(&child, source, caller_qname, calls);
-            break;
-        }
+fn extract_c_call(node: &Node, source: &str) -> Option<String> {
+    if node.kind() != "call_expression" {
+        return None;
+    }
+    let func = node.child_by_field_name("function")?;
+    let callee = extract_callee_name(&func, source);
+    if callee.is_empty() {
+        None
+    } else {
+        Some(callee)
     }
 }
-
-/// Recursively walk looking for `call_expression` nodes.
-fn walk_for_calls(node: &Node, source: &str, caller_qname: &str, calls: &mut Vec<Call>) {
-    if node.kind() == "call_expression"
-        && let Some(func) = node.child_by_field_name("function")
-    {
-        let callee = extract_callee_name(&func, source);
-        if !callee.is_empty() {
-            calls.push(Call {
-                callee_name: callee,
-                caller_qname: caller_qname.to_string(),
-            });
-        }
-    }
-    let mut cur = node.walk();
-    for child in node.children(&mut cur) {
-        walk_for_calls(&child, source, caller_qname, calls);
-    }
-}
-
 /// Extract the simple function name from a C call expression callee.
 fn extract_callee_name(func_node: &Node, source: &str) -> String {
     match func_node.kind() {
