@@ -43,3 +43,63 @@ impl From<&str> for Grounds {
         Self::parse(s)
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_code_grounds() {
+        let g = Grounds::parse("code:auth::login");
+        assert_eq!(g.source, "code");
+        assert_eq!(g.detail, "auth::login");
+    }
+
+    #[test]
+    fn parse_plan_grounds() {
+        let g = Grounds::parse("plan:refactor");
+        assert_eq!(g.source, "plan");
+        assert_eq!(g.detail, "refactor");
+    }
+
+    #[test]
+    fn parse_no_colon_falls_back_to_note() {
+        let g = Grounds::parse("just a note");
+        assert_eq!(g.source, "note");
+        assert_eq!(g.detail, "just a note");
+    }
+
+    #[test]
+    fn parse_empty_source_falls_back() {
+        let g = Grounds::parse(":detail");
+        assert_eq!(g.source, "note");
+        assert_eq!(g.detail, ":detail");
+    }
+
+    #[test]
+    fn parse_empty_detail_falls_back() {
+        let g = Grounds::parse("source:");
+        assert_eq!(g.source, "note");
+        assert_eq!(g.detail, "source:");
+    }
+
+    #[test]
+    fn parse_colon_in_detail() {
+        let g = Grounds::parse("code:a::b::c");
+        assert_eq!(g.source, "code");
+        assert_eq!(g.detail, "a::b::c");
+    }
+
+    #[test]
+    fn validate_format_ok() {
+        let g = Grounds::parse("code:x");
+        assert!(g.validate_format().is_ok());
+    }
+
+    #[test]
+    fn display_roundtrip() {
+        let g = Grounds::parse("code:auth::login");
+        assert_eq!(format!("{}", g), "code:auth::login");
+    }
+}

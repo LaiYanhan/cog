@@ -101,3 +101,56 @@ impl FromStr for AssertionStatus {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn short_id_long_uuid() {
+        assert_eq!(short_id("12345678-90ab-cdef-1234-567890abcdef"), "12345678");
+    }
+
+    #[test]
+    fn short_id_exact_8_chars() {
+        assert_eq!(short_id("12345678"), "12345678");
+    }
+
+    #[test]
+    fn short_id_shorter_than_8() {
+        assert_eq!(short_id("abc"), "abc");
+    }
+
+    #[test]
+    fn short_id_empty() {
+        assert_eq!(short_id(""), "");
+    }
+
+    #[test]
+    fn kind_from_str_roundtrip() {
+        for (variant, s) in [
+            (AssertionKind::Contract, "contract"),
+            (AssertionKind::Intent, "intent"),
+            (AssertionKind::Invariant, "invariant"),
+            (AssertionKind::Fragility, "fragility"),
+            (AssertionKind::Correction, "correction"),
+        ] {
+            assert_eq!(<AssertionKind as FromStr>::from_str(s), Ok(variant));
+            assert_eq!(format!("{}", variant), s);
+        }
+    }
+
+    #[test]
+    fn status_from_str_roundtrip() {
+        for (variant, s) in [
+            (AssertionStatus::Active, "active"),
+            (AssertionStatus::Retracted, "retracted"),
+            (AssertionStatus::Uncertain, "uncertain"),
+        ] {
+            assert_eq!(<AssertionStatus as FromStr>::from_str(s), Ok(variant));
+            assert_eq!(format!("{}", variant), s);
+        }
+    }
+}

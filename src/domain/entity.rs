@@ -144,3 +144,54 @@ impl Entity {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_uppercase_is_type() {
+        assert_eq!(EntityKind::infer("MyClass"), EntityKind::Type);
+    }
+
+    #[test]
+    fn infer_qualified_uppercase_is_type() {
+        assert_eq!(EntityKind::infer("cog::repo::SqliteRepository"), EntityKind::Type);
+    }
+
+    #[test]
+    fn infer_qualified_lowercase_is_function() {
+        assert_eq!(EntityKind::infer("cog::repo::open"), EntityKind::Function);
+    }
+
+    #[test]
+    fn infer_bare_lowercase_is_module() {
+        assert_eq!(EntityKind::infer("utils"), EntityKind::Module);
+    }
+
+    #[test]
+    fn last_segment_qualified() {
+        assert_eq!(last_segment("cog::repo::sqlite::SqliteRepository"), "SqliteRepository");
+    }
+
+    #[test]
+    fn last_segment_bare() {
+        assert_eq!(last_segment("foo"), "foo");
+    }
+
+    #[test]
+    fn parent_qname_qualified() {
+        assert_eq!(parent_qname("cog::repo::sqlite::SqliteRepository"), Some("cog::repo::sqlite"));
+    }
+
+    #[test]
+    fn parent_qname_single() {
+        assert_eq!(parent_qname("foo"), None);
+    }
+
+    #[test]
+    fn parent_qname_two_segments() {
+        assert_eq!(parent_qname("a::b"), Some("a"));
+    }
+}
