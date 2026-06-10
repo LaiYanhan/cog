@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::fmt::Write;
 
 use crate::command::CommandOutput;
 use crate::domain::{AssertionKind, ScoutAction, ScoutSuggestion};
@@ -16,7 +17,7 @@ pub fn start(
     let experiment = Experiment::start(repo, entity, desc, max_nodes)?;
     // Auto-persist as unsaved draft so it survives across CLI invocations.
     experiment::save(&experiment, cog_dir)?;
-    let id_short = &experiment.id[..8];
+    let id_short = crate::domain::short_id(&experiment.id);
     Ok(CommandOutput::success(format!(
         "experiment started: {id_short} (focus: {})\n\
          loaded {} entities, {} assertions\n\
@@ -48,7 +49,7 @@ pub fn hypothesize(
     };
     experiment.hypothesize(op);
     experiment::save(&experiment, cog_dir)?;
-    let id_short = &experiment.id[..8];
+    let id_short = crate::domain::short_id(&experiment.id);
     Ok(CommandOutput::success(format!(
         "hypothesis added to experiment {id_short} ({} ops total)",
         experiment.ops.len()
@@ -130,15 +131,15 @@ fn generate_scout_suggestions(
     scouts
 }
 
-pub fn evaluate(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
-    let mut experiment = experiment::load(id, cog_dir)?;
+/// Evaluate experiment, save state, and format the evaluation body.
+fn evaluate_and_format(experiment: &mut Experiment, cog_dir: &std::path::Path) -> Result<String> {
     let report = experiment.evaluate()?;
     experiment.risk_score = Some(report.risk_score);
     experiment.contradictions = report.contradictions.clone();
     experiment.mark_evaluated()?;
-    experiment::save(&experiment, cog_dir)?;
+    experiment::save(experiment, cog_dir)?;
 
-    let id_short = &experiment.id[..8];
+    let id_short = crate::domain::short_id(&experiment.id);
     let risk_label = if report.risk_score >= 0.8 {
         "HIGH"
     } else if report.risk_score >= 0.5 {
@@ -148,9 +149,7 @@ pub fn evaluate(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
     };
 
     let mut text = format!(
-        "experiment {id_short} evaluated: \"{}\"\n\n\
-         Evaluation:\n  Risk: {risk_label} ({:.2})\n  Contradictions: {}\n  Affected assertions: {}\n  Cascade: {} assertions -> uncertain\n",
-        experiment.description,
+        "Evaluation:\n  Risk: {risk_label} ({:.2})\n  Contradictions: {}\n  Affected assertions: {}\n  Cascade: {} assertions -> uncertain\n",
         report.risk_score,
         report.contradictions.len(),
         report.affected_count,
@@ -160,23 +159,21 @@ pub fn evaluate(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
     if !report.affected_assertions.is_empty() {
         text.push_str("\nAffected:\n");
         for a in &report.affected_assertions {
-            let _ = std::fmt::Write::write_fmt(
-                &mut text,
-                format_args!("  - {}: \"{}\"\n", &a.assertion.id[..8], a.assertion.claim),
+            let _ = writeln!(
+                text,
+                "  - {}: \"{}\"",
+                crate::domain::short_id(&a.assertion.id),
+                a.assertion.claim
             );
         }
     }
 
     if !report.contradictions.is_empty() {
-        text.push_str(&format!(
-            "  {} contradictions:\n",
-            report.contradictions.len()
-        ));
+        let _ = writeln!(text, "  {} contradictions:", report.contradictions.len());
         for c in &report.contradictions {
-            text.push_str(&format!(
-                "    - new: {}\n      existing: {}\n      reason: {}\n",
-                c.new_claim, c.existing_claim, c.reason,
-            ));
+            let _ = writeln!(text, "    - new: {}", c.new_claim);
+            let _ = writeln!(text, "      existing: {}", c.existing_claim);
+            let _ = writeln!(text, "      reason: {}", c.reason);
         }
     }
 
@@ -184,23 +181,32 @@ pub fn evaluate(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
     let scout_text = crate::format::TextRenderer::render_scouts(&scouts);
     text.push_str(&scout_text);
 
-    let _ = std::fmt::Write::write_fmt(
-        &mut text,
-        format_args!(
-            "\nNext: Discard: cog experiment discard {}\nNext: Adjust hypothesis: cog experiment hypothesize {} ...\n",
-            id_short, id_short
-        ),
+    let _ = writeln!(text);
+    let _ = writeln!(text, "Next: Discard: cog experiment discard {}", id_short);
+    let _ = writeln!(
+        text,
+        "Next: Adjust hypothesis: cog experiment hypothesize {} ...",
+        id_short
     );
     if report.contradictions.is_empty() {
-        let _ = std::fmt::Write::write_fmt(
-            &mut text,
-            format_args!(
-                "Next: Safe to proceed: cog experiment commit {}\n",
-                id_short
-            ),
+        let _ = writeln!(
+            text,
+            "Next: Safe to proceed: cog experiment commit {}",
+            id_short
         );
     }
 
+    Ok(text)
+}
+
+pub fn evaluate(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
+    let mut experiment = experiment::load(id, cog_dir)?;
+    let id_short = crate::domain::short_id(&experiment.id);
+    let mut text = format!(
+        "experiment {id_short} evaluated: \"{}\"\n\n",
+        experiment.description
+    );
+    text.push_str(&evaluate_and_format(&mut experiment, cog_dir)?);
     Ok(CommandOutput::success(text))
 }
 
@@ -211,7 +217,7 @@ pub fn commit(repo: &dyn Repository, id: &str, cog_dir: &std::path::Path) -> Res
     let mut text = format!(
         "experiment {} committed\n\
          applied: {} ops, skipped: {}\n",
-        &id[..8],
+        crate::domain::short_id(id),
         commit_report.ops_applied,
         commit_report.ops_skipped,
     );
@@ -223,7 +229,7 @@ pub fn commit(repo: &dyn Repository, id: &str, cog_dir: &std::path::Path) -> Res
 
 pub fn discard(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
     let experiment = experiment::load(id, cog_dir)?;
-    let id_short = experiment.id[..8].to_string();
+    let id_short = crate::domain::short_id(&experiment.id).to_string();
     experiment.discard();
     experiment::remove(id, cog_dir)?;
     Ok(CommandOutput::success(format!(
@@ -238,7 +244,7 @@ pub fn list(cog_dir: &std::path::Path) -> Result<CommandOutput> {
     }
     let mut text = format!("{} experiment(s):\n", ids.len());
     for id in &ids {
-        let short = if id.len() >= 8 { &id[..8] } else { id };
+        let short = crate::domain::short_id(id);
         let saved_tag = match experiment::load(id, cog_dir) {
             Ok(exp) if exp.saved => " [saved]".to_string(),
             Ok(exp) => format!(" [draft, {:?}]", exp.status),
@@ -254,7 +260,7 @@ pub fn save(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
     let was_saved = experiment.saved;
     experiment.mark_saved();
     experiment::save(&experiment, cog_dir)?;
-    let id_short = &experiment.id[..8];
+    let id_short = crate::domain::short_id(&experiment.id);
     let status = if was_saved {
         "checkpoint updated"
     } else {
@@ -269,7 +275,7 @@ pub fn save(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
 
 pub fn load(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
     let experiment = experiment::load(id, cog_dir)?;
-    let id_short = &experiment.id[..8];
+    let id_short = crate::domain::short_id(&experiment.id);
     Ok(CommandOutput::success(format!(
         "experiment {id_short} loaded\n\
          description: {}\n\
@@ -292,7 +298,7 @@ pub fn report(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
     let report = experiment.evaluate()?;
     let mut text = format!(
         "experiment {}\ndescription: {}\nfocus: {}\nstatus: {:?}\nops: {}\nrisk score: {:.2}\naffected: {}\n",
-        &experiment.id[..8],
+        crate::domain::short_id(&experiment.id),
         report.description,
         report.entity_focus,
         experiment.status,
@@ -348,68 +354,11 @@ pub fn try_experiment(repo: &dyn Repository, args: &TryArgs<'_>) -> Result<Comma
         depends_on: args.depends_on.clone(),
     };
     experiment.hypothesize(op);
-    let report = experiment.evaluate()?;
-    experiment.risk_score = Some(report.risk_score);
-    experiment.contradictions = report.contradictions.clone();
-    experiment.mark_evaluated()?;
-    experiment::save(&experiment, args.cog_dir)?;
-
-    let id_short = &experiment.id[..8];
+    let id_short = crate::domain::short_id(&experiment.id);
     let mut text = format!(
-        "Experiment {}: \"{}\"\n\nHypothesis:\n  + [{}] {}: \"{}\"\n\nEvaluation:\n",
-        id_short, experiment.description, args.kind, entity, args.claim
+        "Experiment {id_short}: \"{}\"\n\nHypothesis:\n  + [{}] {}: \"{}\"\n\n",
+        experiment.description, args.kind, entity, args.claim,
     );
-
-    let risk_label = if report.risk_score >= 0.8 {
-        "HIGH"
-    } else if report.risk_score >= 0.5 {
-        "MEDIUM"
-    } else {
-        "LOW"
-    };
-    let _ = std::fmt::Write::write_fmt(
-        &mut text,
-        format_args!(
-            "  Risk: {} ({:.2})\n  Contradictions: {}\n  Affected assertions: {}\n  Cascade: {} assertions -> uncertain\n",
-            risk_label,
-            report.risk_score,
-            report.contradictions.len(),
-            report.affected_count,
-            report.cascade_count,
-        ),
-    );
-
-    // Show the actual affected assertions (not just count)
-    if !report.affected_assertions.is_empty() {
-        text.push_str("\nAffected:\n");
-        for a in &report.affected_assertions {
-            let _ = std::fmt::Write::write_fmt(
-                &mut text,
-                format_args!("  - {}: \"{}\"\n", &a.assertion.id[..8], a.assertion.claim),
-            );
-        }
-    }
-
-    let scouts = generate_scout_suggestions(&report);
-    let scout_text = crate::format::TextRenderer::render_scouts(&scouts);
-    text.push_str(&scout_text);
-
-    let _ = std::fmt::Write::write_fmt(
-        &mut text,
-        format_args!(
-            "\nNext: Discard: cog experiment discard {}\nNext: Adjust hypothesis: cog experiment hypothesize {} --kind correction --claim \"...\" --grounds \"code:{}\"\n",
-            id_short, id_short, entity
-        ),
-    );
-    if report.contradictions.is_empty() {
-        let _ = std::fmt::Write::write_fmt(
-            &mut text,
-            format_args!(
-                "Next: Safe to proceed: cog experiment commit {}\n",
-                id_short
-            ),
-        );
-    }
-
+    text.push_str(&evaluate_and_format(&mut experiment, args.cog_dir)?);
     Ok(CommandOutput::success(text))
 }

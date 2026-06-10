@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use anyhow::Result;
 
 use crate::command::CommandOutput;
@@ -24,44 +26,50 @@ pub fn execute(repo: &dyn Repository, format: ExportFormat) -> Result<CommandOut
 }
 
 fn snapshot_to_dot(snapshot: &ModelSnapshot) -> String {
-    let mut out = String::from("digraph cognitive_model {\n");
-    out.push_str("  rankdir=LR;\n");
+    let mut out = String::new();
+    let _ = writeln!(out, "digraph cognitive_model {{");
+    let _ = writeln!(out, "  rankdir=LR;");
 
     for entity in &snapshot.entities {
-        out.push_str(&format!(
-            "  \"entity:{}\" [shape=box,label=\"{}\\n{}\"];\n",
+        let _ = writeln!(
+            out,
+            "  \"entity:{}\" [shape=box,label=\"{}\\n{}\"];",
             entity.id, entity.qualified_name, entity.kind
-        ));
+        );
     }
 
     for assertion in &snapshot.assertions {
-        out.push_str(&format!(
-            "  \"assertion:{}\" [shape=ellipse,label=\"{}\\n{}\"];\n",
+        let _ = writeln!(
+            out,
+            "  \"assertion:{}\" [shape=ellipse,label=\"{}\\n{}\"];",
             assertion.id,
             assertion.kind,
             assertion.claim.replace('"', "\\\"")
-        ));
-        out.push_str(&format!(
-            "  \"entity:{}\" -> \"assertion:{}\" [label=\"has\"];\n",
+        );
+        let _ = writeln!(
+            out,
+            "  \"entity:{}\" -> \"assertion:{}\" [label=\"has\"];",
             assertion.entity_id, assertion.id
-        ));
+        );
     }
 
     for relation in &snapshot.entity_relations {
-        out.push_str(&format!(
-            "  \"entity:{}\" -> \"entity:{}\" [label=\"{}\"];\n",
+        let _ = writeln!(
+            out,
+            "  \"entity:{}\" -> \"entity:{}\" [label=\"{}\"];",
             relation.from_entity, relation.to_entity, relation.kind
-        ));
+        );
     }
 
     for relation in &snapshot.assertion_relations {
-        out.push_str(&format!(
-            "  \"assertion:{}\" -> \"assertion:{}\" [label=\"{}\"];\n",
+        let _ = writeln!(
+            out,
+            "  \"assertion:{}\" -> \"assertion:{}\" [label=\"{}\"];",
             relation.from_assertion, relation.to_assertion, relation.kind
-        ));
+        );
     }
 
-    out.push_str("}\n");
+    let _ = writeln!(out, "}}");
     out
 }
 

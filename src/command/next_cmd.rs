@@ -48,43 +48,18 @@ fn detect_active_experiments(cog_dir: &std::path::Path) -> Vec<crate::domain::Ac
             continue;
         };
 
-        // Quick parse: look for "status" field
-        let Some(status_pos) = content.find("\"status\":") else {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
             continue;
         };
-        let rest = &content[status_pos + 9..];
-        let trimmed = rest.trim_start();
-
-        let status_label = if trimmed.starts_with("\"Evaluated\"") {
-            "evaluated"
-        } else if trimmed.starts_with("\"Open\"") {
-            "draft"
-        } else {
-            continue; // Committed/Discarded — not active
+        let raw_status = value["status"].as_str().unwrap_or("").to_string();
+        let status_label = match raw_status.as_str() {
+            "Evaluated" => "evaluated",
+            "Open" => "draft",
+            _ => continue, // Committed/Discarded — not active
         };
-
-        let short_id = content
-            .find("\"id\":")
-            .and_then(|i| {
-                let r = &content[i + 5..];
-                let start = r.find('"')? + 1;
-                let end = r[start..].find('"')?;
-                Some(&r[start..start + end])
-            })
-            .map(|id| if id.len() >= 8 { &id[..8] } else { id })
-            .unwrap_or("unknown")
-            .to_string();
-
-        let description = content
-            .find("\"description\":")
-            .and_then(|i| {
-                let r = &content[i + 15..];
-                let start = r.find('"')? + 1;
-                let end = r[start..].find('"')?;
-                Some(&r[start..start + end])
-            })
-            .unwrap_or("")
-            .to_string();
+        let short_id =
+            crate::domain::short_id(value["id"].as_str().unwrap_or_default()).to_string();
+        let description = value["description"].as_str().unwrap_or("").to_string();
 
         // Use file mtime as proxy for evaluation time
         let mtime = std::fs::metadata(&path)

@@ -59,7 +59,7 @@ pub fn save(experiment: &Experiment, cog_dir: &Path) -> Result<()> {
 }
 pub fn load(id: &str, cog_dir: &Path) -> Result<Experiment> {
     let path = resolve_path(id, cog_dir)?.ok_or_else(|| {
-        let short_id = if id.len() >= 8 { &id[..8] } else { id };
+        let short_id = crate::domain::short_id(id);
         anyhow!(
             "experiment {short_id} not found at {}\n\
              Possible causes:\n\
@@ -71,7 +71,7 @@ pub fn load(id: &str, cog_dir: &Path) -> Result<Experiment> {
         )
     })?;
     let json = std::fs::read_to_string(&path).with_context(|| {
-        let short_id = if id.len() >= 8 { &id[..8] } else { id };
+        let short_id = crate::domain::short_id(id);
         format!("failed to read experiment {short_id} at {}", path.display())
     })?;
     let experiment: Experiment = serde_json::from_str(&json)?;
