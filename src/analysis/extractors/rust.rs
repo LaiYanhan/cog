@@ -1,6 +1,6 @@
 use tree_sitter::{Node, TreeCursor};
 
-use super::{Definition, Import, node_text};
+use super::{Call, Definition, Import, node_text};
 use crate::domain::EntityKind;
 
 pub fn extract_rust<'a>(
@@ -8,15 +8,23 @@ pub fn extract_rust<'a>(
     source: &str,
     module_qname: &str,
     cursor: &mut TreeCursor<'a>,
-) -> (Vec<Definition>, Vec<Import>) {
+) -> (Vec<Definition>, Vec<Import>, Vec<Call>) {
     let mut defs = Vec::new();
     let mut imports = Vec::new();
+    let mut calls = Vec::new();
 
     for child in root.children(cursor) {
-        process_rust_child(&child, source, module_qname, &mut defs, &mut imports);
+        process_rust_child(
+            &child,
+            source,
+            module_qname,
+            &mut defs,
+            &mut imports,
+            &mut calls,
+        );
     }
 
-    (defs, imports)
+    (defs, imports, calls)
 }
 
 fn process_rust_child<'a>(
@@ -25,16 +33,19 @@ fn process_rust_child<'a>(
     module_qname: &str,
     defs: &mut Vec<Definition>,
     imports: &mut Vec<Import>,
+    calls: &mut Vec<Call>,
 ) {
     match child.kind() {
         "function_item" => {
             if let Some(name_node) = child.child_by_field_name("name") {
                 let name = node_text(&name_node, source);
+                let fqname = format!("{module_qname}::{name}");
                 defs.push(Definition {
-                    qualified_name: format!("{module_qname}::{name}"),
+                    qualified_name: fqname.clone(),
                     kind: EntityKind::Function,
                     parent: None,
                 });
+                extract_calls_from_body(child, source, &fqname, calls);
             }
         }
         "struct_item" | "enum_item" | "trait_item" => {
@@ -48,7 +59,7 @@ fn process_rust_child<'a>(
             }
         }
         "impl_item" => {
-            extract_rust_impl(child, source, module_qname, defs);
+            extract_rust_impl(child, source, module_qname, defs, calls);
         }
         "use_declaration" => {
             let mut cur = child.walk();
@@ -79,7 +90,7 @@ fn process_rust_child<'a>(
                         | "attribute_item"
                         | "_declaration_statement"
                 ) {
-                    process_rust_child(&inner, source, module_qname, defs, imports);
+                    process_rust_child(&inner, source, module_qname, defs, imports, calls);
                 }
             }
         }
@@ -92,6 +103,7 @@ fn extract_rust_impl(
     source: &str,
     module_qname: &str,
     defs: &mut Vec<Definition>,
+    calls: &mut Vec<Call>,
 ) {
     let impl_name = impl_node
         .child_by_field_name("type")
@@ -107,17 +119,90 @@ fn extract_rust_impl(
                     && let Some(name_node) = inner.child_by_field_name("name")
                 {
                     let fn_name = node_text(&name_node, source);
+                    let fqname = if let Some(iname) = &impl_name {
+                        format!("{module_qname}::{iname}::{fn_name}")
+                    } else {
+                        format!("{module_qname}::{fn_name}")
+                    };
                     defs.push(Definition {
-                        qualified_name: if let Some(iname) = &impl_name {
-                            format!("{module_qname}::{iname}::{fn_name}")
-                        } else {
-                            format!("{module_qname}::{fn_name}")
-                        },
+                        qualified_name: fqname.clone(),
                         kind: EntityKind::Method,
                         parent: impl_name.clone(),
                     });
+                    extract_calls_from_body(&inner, source, &fqname, calls);
                 }
             }
         }
+    }
+}
+
+/// Walk a function body looking for `call_expression` nodes.
+fn extract_calls_from_body(
+    func_node: &Node,
+    source: &str,
+    caller_qname: &str,
+    calls: &mut Vec<Call>,
+) {
+    let mut cursor = func_node.walk();
+    for child in func_node.children(&mut cursor) {
+        if child.kind() == "block" {
+            walk_for_calls(&child, source, caller_qname, calls);
+            break;
+        }
+    }
+}
+
+/// Recursively walk an AST subtree looking for `call_expression` nodes.
+fn walk_for_calls(node: &Node, source: &str, caller_qname: &str, calls: &mut Vec<Call>) {
+    if node.kind() == "call_expression"
+        && let Some(func) = node.child_by_field_name("function")
+    {
+        let callee = extract_callee_name(&func, source);
+        if !callee.is_empty() {
+            calls.push(Call {
+                callee_name: callee,
+                caller_qname: caller_qname.to_string(),
+            });
+        }
+    }
+    let mut cur = node.walk();
+    for child in node.children(&mut cur) {
+        walk_for_calls(&child, source, caller_qname, calls);
+    }
+}
+
+/// Extract the simple function/method name from a Rust call expression callee.
+/// Handles `function()`, `self.method()`, `Module::func()`, `obj.method()`.
+fn extract_callee_name(func_node: &Node, source: &str) -> String {
+    match func_node.kind() {
+        "identifier" => node_text(func_node, source),
+        "field_expression" => {
+            // `self.method()` or `obj.method()` — take the field name
+            func_node
+                .child_by_field_name("field")
+                .map(|n| node_text(&n, source))
+                .unwrap_or_default()
+        }
+        "scoped_identifier" => {
+            // `Module::func()` — take the name (last part)
+            func_node
+                .child_by_field_name("name")
+                .map(|n| node_text(&n, source))
+                .unwrap_or_default()
+        }
+        "generic_function" => {
+            // `Vec::<T>::new()` — walk into the scoped_identifier inside
+            let mut cur = func_node.walk();
+            for child in func_node.children(&mut cur) {
+                if child.kind() == "scoped_identifier"
+                    || child.kind() == "field_expression"
+                    || child.kind() == "identifier"
+                {
+                    return extract_callee_name(&child, source);
+                }
+            }
+            String::new()
+        }
+        _ => String::new(),
     }
 }

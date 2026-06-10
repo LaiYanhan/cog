@@ -43,6 +43,7 @@ struct SyncContext {
     def_entity_ids: HashMap<String, String>, // qualified_name → entity_id
     contains_count: usize,
     uses_count: usize,
+    calls_count: usize,
     kind_counts: HashMap<String, usize>,
     def_count: usize,
 }
@@ -55,6 +56,7 @@ impl SyncContext {
             def_entity_ids: HashMap::new(),
             contains_count: 0,
             uses_count: 0,
+            calls_count: 0,
             kind_counts: HashMap::new(),
             def_count: 0,
         }
@@ -76,9 +78,8 @@ impl SyncContext {
     }
 
     fn relations_created(&self) -> usize {
-        self.contains_count + self.uses_count
+        self.contains_count + self.uses_count + self.calls_count
     }
-
     /// Create directory Module entities and their contains hierarchy.
     fn create_dir_entities(
         &mut self,
@@ -262,6 +263,50 @@ impl SyncContext {
                     repo.add_entity_relation(&from_id, target_id, EntityRelationKind::Uses)?;
                     self.uses_count += 1;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Create `Calls` relations from extracted call sites.
+    ///
+    /// Matches callee simple names to definition entities in the scan.  If a
+    /// callee name appears in multiple entities the last one wins — this is
+    /// imprecise but covers the common case of a single codebase naming
+    /// convention.
+    fn create_call_relations(
+        &mut self,
+        repo: &dyn Repository,
+        file_scans: &[FileScan],
+    ) -> Result<()> {
+        // Build simple-name → entity_id index for callee resolution
+        let mut name_index: HashMap<&str, &str> = HashMap::new();
+        for (qname, id) in &self.def_entity_ids {
+            name_index.insert(crate::domain::entity::last_segment(qname), id);
+        }
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        for file_scan in file_scans {
+            for call in &file_scan.calls {
+                // caller must be a known definition entity
+                let from_id = match self.def_entity_ids.get(&call.caller_qname) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                // callee is resolved by simple name
+                let to_id = match name_index.get(call.callee_name.as_str()) {
+                    Some(id) => (*id).to_string(),
+                    None => continue,
+                };
+                // No self-edges
+                if *from_id == to_id {
+                    continue;
+                }
+                // Deduplicate across multiple call sites in the same function
+                if !seen.insert(((*from_id).to_string(), to_id.clone())) {
+                    continue;
+                }
+                repo.add_entity_relation(from_id, &to_id, EntityRelationKind::Calls)?;
+                self.calls_count += 1;
             }
         }
         Ok(())
@@ -495,6 +540,7 @@ pub fn execute(
     ctx.create_file_entities(repo, &result.file_scans, &scan_root)?;
     ctx.create_definition_entities(repo, &result.definitions, &result.file_scans, &scan_root)?;
     ctx.create_import_relations(repo, &result.imports, &result.file_scans, &scan_root)?;
+    ctx.create_call_relations(repo, &result.file_scans)?;
 
     // Drift cleanup
     let scanned_names = collect_scanned_names(&result, &scan_root);

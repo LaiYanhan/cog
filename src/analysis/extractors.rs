@@ -35,11 +35,22 @@ pub struct Import {
     pub imported_names: Vec<String>,
 }
 
+/// A function/method call extracted from source code.
+#[derive(Debug, Clone)]
+pub struct Call {
+    /// The callee name as it appears at the call site (simple name —
+    /// `decode`, `format_code`, `__init__`). Not a qualified name.
+    pub callee_name: String,
+    /// The qualified name of the enclosing function/method (the caller).
+    pub caller_qname: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct FileScan {
     pub path: PathBuf,
     pub definitions: Vec<Definition>,
     pub imports: Vec<Import>,
+    pub calls: Vec<Call>,
 }
 
 // ── Language utilities ────────────────────────────────────────────────────
@@ -67,7 +78,7 @@ pub fn extract<'a>(
     lang: Language,
     module_qname: &str,
     cursor: &mut TreeCursor<'a>,
-) -> (Vec<Definition>, Vec<Import>) {
+) -> (Vec<Definition>, Vec<Import>, Vec<Call>) {
     match lang {
         Language::Python => extract_python(root, source, module_qname, cursor),
         Language::Rust => extract_rust(root, source, module_qname, cursor),

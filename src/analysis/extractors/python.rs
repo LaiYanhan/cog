@@ -1,6 +1,6 @@
 use tree_sitter::{Node, TreeCursor};
 
-use super::{Definition, Import, node_text};
+use super::{Call, Definition, Import, node_text};
 use crate::domain::EntityKind;
 
 pub fn extract_python<'a>(
@@ -8,20 +8,24 @@ pub fn extract_python<'a>(
     source: &str,
     module_qname: &str,
     cursor: &mut TreeCursor<'a>,
-) -> (Vec<Definition>, Vec<Import>) {
+) -> (Vec<Definition>, Vec<Import>, Vec<Call>) {
     let mut defs = Vec::new();
     let mut imports = Vec::new();
+    let mut calls = Vec::new();
 
     for child in root.children(cursor) {
         match child.kind() {
             "function_definition" => {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = node_text(&name_node, source);
+                    let fqname = format!("{module_qname}::{name}");
                     defs.push(Definition {
-                        qualified_name: format!("{module_qname}::{name}"),
+                        qualified_name: fqname.clone(),
                         kind: EntityKind::Function,
                         parent: None,
                     });
+                    // Extract calls from function body
+                    extract_calls_from_body(&child, source, &fqname, &mut calls);
                 }
             }
             "class_definition" => {
@@ -38,6 +42,7 @@ pub fn extract_python<'a>(
                         module_qname,
                         &class_name,
                         &mut defs,
+                        &mut calls,
                     );
                 }
             }
@@ -82,7 +87,7 @@ pub fn extract_python<'a>(
         }
     }
 
-    (defs, imports)
+    (defs, imports, calls)
 }
 
 fn extract_python_class_methods(
@@ -91,6 +96,7 @@ fn extract_python_class_methods(
     module_qname: &str,
     class_name: &str,
     defs: &mut Vec<Definition>,
+    calls: &mut Vec<Call>,
 ) {
     let mut cursor = class_node.walk();
     for child in class_node.children(&mut cursor) {
@@ -101,14 +107,77 @@ fn extract_python_class_methods(
                     && let Some(name_node) = stmt.child_by_field_name("name")
                 {
                     let method_name = node_text(&name_node, source);
+                    let fqname = format!("{module_qname}::{class_name}::{method_name}");
                     defs.push(Definition {
-                        qualified_name: format!("{module_qname}::{class_name}::{method_name}"),
+                        qualified_name: fqname.clone(),
                         kind: EntityKind::Method,
                         parent: Some(class_name.to_owned()),
                     });
+                    // Extract calls from method body
+                    extract_calls_from_body(&stmt, source, &fqname, calls);
                 }
             }
             break;
         }
+    }
+}
+
+/// Walk a function/method body and extract all `call` nodes,
+/// recording just the callee's simple name (not qualified).
+fn extract_calls_from_body(
+    func_node: &Node,
+    source: &str,
+    caller_qname: &str,
+    calls: &mut Vec<Call>,
+) {
+    // Find the block under the function_definition
+    let mut cursor = func_node.walk();
+    for child in func_node.children(&mut cursor) {
+        if child.kind() == "block" {
+            walk_for_calls(&child, source, caller_qname, calls);
+            break;
+        }
+    }
+}
+
+/// Recursively walk an AST subtree looking for `call` nodes.
+fn walk_for_calls(node: &Node, source: &str, caller_qname: &str, calls: &mut Vec<Call>) {
+    if node.kind() == "call" {
+        // The function being called is the first child (before `argument_list`)
+        if let Some(func) = node.child(0) {
+            let callee = extract_callee_name(&func, source);
+            if !callee.is_empty() {
+                calls.push(Call {
+                    callee_name: callee,
+                    caller_qname: caller_qname.to_string(),
+                });
+            }
+        }
+        // Don't recurse into the callee's own body (nested defs)
+        // — just continue processing siblings.
+    }
+    let mut cur = node.walk();
+    for child in node.children(&mut cur) {
+        walk_for_calls(&child, source, caller_qname, calls);
+    }
+}
+
+/// Extract the simple function/method name from the expression node
+/// that serves as the callable.  Handles:
+///   `foo()`          → "foo"
+///   `self.bar()`     → "bar"
+///   `obj.method()`   → "method"
+///   `Module.func()`  → "func"
+fn extract_callee_name(func_node: &Node, source: &str) -> String {
+    match func_node.kind() {
+        "identifier" => node_text(func_node, source),
+        "attribute" => {
+            // Attribute: `self.method` — take the attribute name (last child)
+            func_node
+                .child_by_field_name("attribute")
+                .map(|n| node_text(&n, source))
+                .unwrap_or_default()
+        }
+        _ => String::new(),
     }
 }

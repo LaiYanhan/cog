@@ -1,6 +1,6 @@
 use tree_sitter::{Node, TreeCursor};
 
-use super::{Definition, Import, node_text};
+use super::{Call, Definition, Import, node_text};
 use crate::domain::EntityKind;
 
 pub fn extract_c<'a>(
@@ -8,9 +8,10 @@ pub fn extract_c<'a>(
     source: &str,
     module_qname: &str,
     cursor: &mut TreeCursor<'a>,
-) -> (Vec<Definition>, Vec<Import>) {
+) -> (Vec<Definition>, Vec<Import>, Vec<Call>) {
     let mut defs = Vec::new();
     let mut imports = Vec::new();
+    let mut calls = Vec::new();
 
     for child in root.children(cursor) {
         match child.kind() {
@@ -18,11 +19,13 @@ pub fn extract_c<'a>(
                 if let Some(declarator) = child.child_by_field_name("declarator") {
                     let name = extract_c_declarator_name(&declarator, source);
                     if !name.is_empty() {
+                        let fqname = format!("{module_qname}::{name}");
                         defs.push(Definition {
-                            qualified_name: format!("{module_qname}::{name}"),
+                            qualified_name: fqname.clone(),
                             kind: EntityKind::Function,
                             parent: None,
                         });
+                        extract_calls_from_body(&child, source, &fqname, &mut calls);
                     }
                 }
             }
@@ -67,7 +70,64 @@ pub fn extract_c<'a>(
         }
     }
 
-    (defs, imports)
+    (defs, imports, calls)
+}
+
+/// Walk a function body looking for `call_expression` nodes.
+fn extract_calls_from_body(
+    func_node: &Node,
+    source: &str,
+    caller_qname: &str,
+    calls: &mut Vec<Call>,
+) {
+    let mut cursor = func_node.walk();
+    for child in func_node.children(&mut cursor) {
+        if child.kind() == "compound_statement" {
+            walk_for_calls(&child, source, caller_qname, calls);
+            break;
+        }
+    }
+}
+
+/// Recursively walk looking for `call_expression` nodes.
+fn walk_for_calls(node: &Node, source: &str, caller_qname: &str, calls: &mut Vec<Call>) {
+    if node.kind() == "call_expression"
+        && let Some(func) = node.child_by_field_name("function")
+    {
+        let callee = extract_callee_name(&func, source);
+        if !callee.is_empty() {
+            calls.push(Call {
+                callee_name: callee,
+                caller_qname: caller_qname.to_string(),
+            });
+        }
+    }
+    let mut cur = node.walk();
+    for child in node.children(&mut cur) {
+        walk_for_calls(&child, source, caller_qname, calls);
+    }
+}
+
+/// Extract the simple function name from a C call expression callee.
+fn extract_callee_name(func_node: &Node, source: &str) -> String {
+    match func_node.kind() {
+        "identifier" => node_text(func_node, source),
+        "field_expression" => func_node
+            .child_by_field_name("field")
+            .map(|n| node_text(&n, source))
+            .unwrap_or_default(),
+        "pointer_expression" => {
+            // *func_ptr() — walk to the inner identifier
+            let mut cur = func_node.walk();
+            for child in func_node.children(&mut cur) {
+                if child.kind() == "identifier" {
+                    return node_text(&child, source);
+                }
+            }
+            String::new()
+        }
+        _ => String::new(),
+    }
 }
 
 fn extract_c_declarator_name(node: &Node, source: &str) -> String {

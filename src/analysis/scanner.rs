@@ -81,13 +81,14 @@ pub fn scan_file(
     let root_node = tree.root_node();
     let mut cursor = root_node.walk();
 
-    let (definitions, imports) =
+    let (definitions, imports, calls) =
         extractors::extract(&root_node, &source, lang, &module_qname, &mut cursor);
 
     Ok(FileScan {
         path: path.to_path_buf(),
         definitions,
         imports,
+        calls,
     })
 }
 
