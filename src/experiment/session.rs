@@ -180,6 +180,8 @@ impl Experiment {
             .map(|en| en.entity.qualified_name.clone())
             .collect();
 
+        let affected_assertions: Vec<AffectedAssertion> = cascade_affected.clone();
+
         let risk = self
             .semantic
             .assess_risk(&self.entity_focus_id, &self.structure);
@@ -193,6 +195,7 @@ impl Experiment {
             affected_count: cascade_affected.len() + contradictions.len(),
             cascade_count: cascade_affected.len(),
             contradictions,
+            affected_assertions,
             blind_entities,
             boundary_entities: self.boundary_entities.clone(),
         })

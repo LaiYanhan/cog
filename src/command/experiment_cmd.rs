@@ -157,6 +157,16 @@ pub fn evaluate(id: &str, cog_dir: &std::path::Path) -> Result<CommandOutput> {
         report.cascade_count,
     );
 
+    if !report.affected_assertions.is_empty() {
+        text.push_str("\nAffected:\n");
+        for a in &report.affected_assertions {
+            let _ = std::fmt::Write::write_fmt(
+                &mut text,
+                format_args!("  - {}: \"{}\"\n", &a.assertion.id[..8], a.assertion.claim),
+            );
+        }
+    }
+
     if !report.contradictions.is_empty() {
         text.push_str(&format!(
             "  {} contradictions:\n",

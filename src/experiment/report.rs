@@ -11,6 +11,8 @@ pub struct ExperimentReport {
     /// Number of assertions that would become Uncertain via TMS cascade.
     pub cascade_count: usize,
     pub contradictions: Vec<Contradiction>,
+    /// Assertions affected by the TMS cascade (with claim text).
+    pub affected_assertions: Vec<crate::domain::AffectedAssertion>,
     /// Subgraph entities that have no active assertions.
     pub blind_entities: Vec<String>,
     pub boundary_entities: Vec<String>,
