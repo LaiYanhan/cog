@@ -30,8 +30,8 @@ mod tests {
         store.create_assertion(&a.id, AssertionKind::Contract, "a", "note:a", None)?;
         let output = execute(&store, "A", OutputFormat::Text)?;
         assert_eq!(output.exit_code, 0);
-        assert!(output.text.contains("Impact for: A"));
-        assert!(output.text.contains("B [module]"));
+        assert!(output.text.contains("Blind dependents (1): B"));
+        // "B [module]" format is only for covered entities.
         Ok(())
     }
 

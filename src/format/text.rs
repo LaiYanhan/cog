@@ -212,34 +212,64 @@ impl TextRenderer {
         }
 
         if !result.downstream_entities.is_empty() {
-            let _ = writeln!(out);
-            let _ = writeln!(out, "Dependents:");
-            let max_display = 30;
-            for (i, entity) in result
-                .downstream_entities
-                .iter()
-                .take(max_display)
-                .enumerate()
-            {
+            // Partition into covered (has assertions) and blind (no assertions).
+            let mut covered: Vec<(&Entity, usize)> = Vec::new();
+            let mut blind: Vec<&Entity> = Vec::new();
+            for (i, entity) in result.downstream_entities.iter().enumerate() {
                 let count = result
                     .downstream_assertion_counts
                     .get(i)
                     .copied()
                     .unwrap_or(0);
-                let tag = if count > 0 { "covered" } else { "blind" };
-                let _ = writeln!(
-                    out,
-                    "  {} [{}]    {} ({} assertion{})",
-                    entity.qualified_name,
-                    entity.kind,
-                    tag,
-                    count,
-                    if count == 1 { "" } else { "s" }
-                );
+                if count > 0 {
+                    covered.push((entity, count));
+                } else {
+                    blind.push(entity);
+                }
             }
-            if result.downstream_entities.len() > max_display {
-                let remaining = result.downstream_entities.len() - max_display;
-                let _ = writeln!(out, "  ... and {} more", remaining);
+
+            // Covered dependents — these have knowledge at stake, show all.
+            if !covered.is_empty() {
+                let _ = writeln!(out);
+                let _ = writeln!(out, "Covered dependents:");
+                for (entity, count) in &covered {
+                    let _ = writeln!(
+                        out,
+                        "  {} [{}]    ({} assertion{})",
+                        entity.qualified_name,
+                        entity.kind,
+                        count,
+                        if *count == 1 { "" } else { "s" }
+                    );
+                }
+            }
+
+            // Blind dependents — no recorded knowledge at risk, collapse to count + samples.
+            if !blind.is_empty() {
+                let _ = writeln!(out);
+                let sample_max = 4usize;
+                let sample_names: Vec<&str> = blind
+                    .iter()
+                    .take(sample_max)
+                    .map(|e| e.qualified_name.as_str())
+                    .collect();
+                if blind.len() <= sample_max {
+                    let _ = writeln!(
+                        out,
+                        "Blind dependents ({}): {}",
+                        blind.len(),
+                        sample_names.join(", ")
+                    );
+                } else {
+                    let remaining = blind.len() - sample_max;
+                    let _ = writeln!(
+                        out,
+                        "Blind dependents: {} entities, e.g. {} ... and {} more",
+                        blind.len(),
+                        sample_names.join(", "),
+                        remaining
+                    );
+                }
             }
         } else {
             let _ = writeln!(out);
