@@ -16,19 +16,20 @@ pub struct AssertInput<'a> {
     pub claim: &'a str,
     pub grounds: &'a str,
     pub depends_on: Option<&'a str>,
-    pub replace: bool,
+    /// Specific assertion ID to retract before creating this one.
+    pub replace_id: Option<&'a str>,
+    /// Create alongside existing active assertions (for different aspects).
     pub force: bool,
     pub output: OutputFormat,
 }
-
 /// Gate: if the entity already has active assertions of `kind`, require
-/// `--replace` or `--force`. Returns the IDs of any auto-retracted assertions.
+/// `--replace <id>` or `--force`. Returns the IDs of any auto-retracted assertions.
 /// Returns `Err(output)` with exit code 1 when blocked; caller should return it.
 fn enforce_kind_gate(
     repo: &dyn Repository,
     entity: &crate::domain::Entity,
     kind: AssertionKind,
-    replace: bool,
+    replace_id: Option<&str>,
     force: bool,
 ) -> Result<Vec<String>, CommandOutput> {
     let existing = repo
@@ -43,35 +44,58 @@ fn enforce_kind_gate(
         return Ok(Vec::new());
     }
 
-    if replace {
-        let mut ids = Vec::with_capacity(active_same_kind.len());
-        for a in &active_same_kind {
-            repo.retract_assertion(&a.id, &format!("replaced by newer {kind} assertion"))
-                .map_err(|e| CommandOutput::with_exit_code(e.to_string(), 1))?;
-            repo.append_changelog(
-                ChangelogAction::Retract,
-                &a.id,
-                &format!(
-                    "auto-retracted: replaced by newer {kind} assertion on {}",
-                    entity.qualified_name
-                ),
-            )
+    if let Some(id) = replace_id {
+        // Retract the specific assertion by ID.
+        let resolved = repo
+            .resolve_assertion_id(id)
             .map_err(|e| CommandOutput::with_exit_code(e.to_string(), 1))?;
-            ids.push(a.id.clone());
+        let target = repo
+            .get_assertion(&resolved)
+            .map_err(|e| CommandOutput::with_exit_code(e.to_string(), 1))?
+            .ok_or_else(|| {
+                CommandOutput::with_exit_code(format!("assertion not found: {id}"), 1)
+            })?;
+        if !target.is_active() {
+            return Err(CommandOutput::with_exit_code(
+                format!("assertion {id} is already retracted"),
+                1,
+            ));
         }
-        return Ok(ids);
+        if target.entity_id != entity.id || target.kind != kind {
+            return Err(CommandOutput::with_exit_code(
+                format!(
+                    "assertion {id} is not a {} assertion on {}",
+                    kind, entity.qualified_name
+                ),
+                1,
+            ));
+        }
+        repo.retract_assertion(&target.id, &format!("replaced by newer {kind} assertion"))
+            .map_err(|e| CommandOutput::with_exit_code(e.to_string(), 1))?;
+        repo.append_changelog(
+            ChangelogAction::Retract,
+            &target.id,
+            &format!(
+                "auto-retracted: replaced by newer {kind} assertion on {}",
+                entity.qualified_name
+            ),
+        )
+        .map_err(|e| CommandOutput::with_exit_code(e.to_string(), 1))?;
+        return Ok(vec![target.id.clone()]);
     }
 
     if force {
         return Ok(Vec::new());
     }
 
-    // Blocked — list existing and require a flag.
+    // Blocked — list existing and require --replace <id> or --force.
+    let plural = if active_same_kind.len() == 1 { "" } else { "s" };
     let mut msg = format!(
-        "{} already has {} active {} assertion(s):\n",
+        "{} already has {} active {} assertion{}:\n",
         entity.qualified_name,
         active_same_kind.len(),
-        kind
+        kind,
+        plural
     );
     for a in &active_same_kind {
         let _ = std::fmt::Write::write_fmt(
@@ -79,9 +103,12 @@ fn enforce_kind_gate(
             format_args!("  {}: \"{}\"\n", crate::domain::short_id(&a.id), a.claim),
         );
     }
-    msg.push_str(
-        "Use --replace to retract existing and create new, or --force to create alongside.",
-    );
+    msg.push_str("Avoid contradictory assertions on the same entity.\n");
+    msg.push_str(&format!(
+        "  --replace {}   Replace that one and create this new assertion\n",
+        crate::domain::short_id(&active_same_kind[0].id)
+    ));
+    msg.push_str("  --force          Create alongside (only if this describes a different aspect)");
     Err(CommandOutput::with_exit_code(msg, 1))
 }
 
@@ -129,7 +156,7 @@ pub fn execute(repo: &dyn Repository, input: AssertInput<'_>) -> Result<CommandO
     };
 
     let retracted_ids =
-        match enforce_kind_gate(repo, &entity, input.kind, input.replace, input.force) {
+        match enforce_kind_gate(repo, &entity, input.kind, input.replace_id, input.force) {
             Ok(ids) => ids,
             Err(output) => return Ok(output),
         };
@@ -198,7 +225,7 @@ mod tests {
                 claim: "returns token on success",
                 grounds: "code:auth::login",
                 depends_on: None,
-                replace: false,
+                replace_id: None,
                 force: false,
                 output: OutputFormat::Text,
             },
@@ -235,7 +262,7 @@ mod tests {
                 claim: "returns token",
                 grounds: "code:auth::login",
                 depends_on: None,
-                replace: false,
+                replace_id: None,
                 force: false,
                 output: OutputFormat::Text,
             },
@@ -250,7 +277,7 @@ mod tests {
                 claim: "returns token on success",
                 grounds: "code:auth::login",
                 depends_on: None,
-                replace: false,
+                replace_id: None,
                 force: false,
                 output: OutputFormat::Text,
             },
@@ -262,7 +289,7 @@ mod tests {
                 .text
                 .contains("already has 1 active contract assertion")
         );
-        assert!(output.text.contains("Use --replace"));
+        assert!(output.text.contains("--replace"));
         Ok(())
     }
 
@@ -279,11 +306,18 @@ mod tests {
                 claim: "returns token",
                 grounds: "code:auth::login",
                 depends_on: None,
-                replace: false,
+                replace_id: None,
                 force: false,
                 output: OutputFormat::Text,
             },
         )?;
+
+        // Capture the first assertion's ID for --replace use.
+        let entity = store
+            .get_entity_by_name("auth::login")?
+            .expect("entity should exist");
+        let assertions = store.get_assertions_for_entity(&entity.id)?;
+        let first_id = assertions[0].id.clone();
 
         // Replace it.
         let output = execute(
@@ -294,7 +328,7 @@ mod tests {
                 claim: "returns token on success",
                 grounds: "code:auth::login",
                 depends_on: None,
-                replace: true,
+                replace_id: Some(&first_id),
                 force: false,
                 output: OutputFormat::Text,
             },
@@ -327,7 +361,7 @@ mod tests {
                 claim: "slow with large inputs",
                 grounds: "code:auth::login",
                 depends_on: None,
-                replace: false,
+                replace_id: None,
                 force: false,
                 output: OutputFormat::Text,
             },
@@ -342,7 +376,7 @@ mod tests {
                 claim: "thread-unsafe",
                 grounds: "code:auth::login",
                 depends_on: None,
-                replace: false,
+                replace_id: None,
                 force: true,
                 output: OutputFormat::Text,
             },
