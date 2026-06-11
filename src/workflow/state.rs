@@ -21,7 +21,10 @@ pub enum WorkflowPhase {
     FreshScan,
     /// Browsing, querying, recording assertions — all model interaction
     Exploring,
-    /// Code just modified, verify passed, awaiting correction recording
+    /// Experiment committed — model updated but code not yet changed.
+    /// Agent must implement planned changes, then sync.
+    PendingImplement,
+    /// Code just modified (sync detected drift), awaiting model reconciliation
     PostChange,
     /// Problem found — retract triggered TMS cascade, or verify found inconsistency
     Debugging,
@@ -87,16 +90,15 @@ impl WorkflowState {
         }
     }
 
-    /// After `query`, `assert`, `depend` — transitions from FreshScan to Exploring.
-    /// Exploring stays Exploring. PostChange transitions to Exploring.
-    /// Debugging stays Debugging.
     pub fn transition_explore(&mut self) {
         if let WorkflowState::Ready { phase } = self {
             match phase {
                 WorkflowPhase::FreshScan | WorkflowPhase::PostChange => {
                     *phase = WorkflowPhase::Exploring;
                 }
-                WorkflowPhase::Exploring | WorkflowPhase::Debugging => {}
+                WorkflowPhase::Exploring
+                | WorkflowPhase::Debugging
+                | WorkflowPhase::PendingImplement => {}
             }
         }
     }
@@ -128,6 +130,7 @@ fn phase_label(phase: &WorkflowPhase) -> &'static str {
     match phase {
         WorkflowPhase::FreshScan => "fresh_scan",
         WorkflowPhase::Exploring => "exploring",
+        WorkflowPhase::PendingImplement => "pending_implement",
         WorkflowPhase::PostChange => "post_change",
         WorkflowPhase::Debugging => "debugging",
     }

@@ -33,6 +33,8 @@ pub enum ActionKind {
     CommitExperiment,
     RecoverContext,
     RecordConstraint,
+    /// Implement planned code changes (model is ahead of code)
+    ImplementPlanned,
 }
 
 // ── Public entry point ──────────────────────────────────────────────────────
@@ -224,6 +226,37 @@ fn suggest_post_change(stats: &ModelStats) -> Vec<SuggestedAction> {
 
     actions
 }
+
+fn suggest_pending_implement(stats: &ModelStats) -> Vec<SuggestedAction> {
+    let mut actions = Vec::new();
+
+    // The model has been updated (experiment committed) but code hasn't changed yet.
+    // The agent must implement the planned changes and then sync.
+    actions.push(SuggestedAction {
+        action: ActionKind::ImplementPlanned,
+        description: "Model updated with planned changes. Implement the corresponding code changes now.".into(),
+        example_command: "# make the code changes, then: cog sync".into(),
+    });
+
+    actions.push(SuggestedAction {
+        action: ActionKind::VerifyConsistency,
+        description: "After implementing, sync to update structural entities and verify consistency.".into(),
+        example_command: "cog sync".into(),
+    });
+
+    if stats.uncertain_assertions > 0 {
+        actions.push(SuggestedAction {
+            action: ActionKind::ReviewUncertainAssertions,
+            description: format!(
+                "{} assertion(s) became uncertain during experiment. Review after implementation.",
+                stats.uncertain_assertions
+            ),
+            example_command: "cog recover".into(),
+        });
+    }
+
+    actions
+}
 fn suggest_debugging(stats: &ModelStats, changelog: &[ChangelogEntry]) -> Vec<SuggestedAction> {
     let mut actions = Vec::new();
 
@@ -339,17 +372,15 @@ fn suggest_for_ready(
             example_command: "cog experiment commit <id>".into(),
         });
     }
-
-    // ── Phase-specific suggestions ───────────────────────────────────────
     let phase_actions = match phase {
         WorkflowPhase::FreshScan => suggest_fresh_scan(repo, &stats),
         WorkflowPhase::Debugging => suggest_debugging(&stats, &changelog),
         WorkflowPhase::Exploring => suggest_exploring(repo, &stats, coverage_pct, &changelog),
         WorkflowPhase::PostChange => suggest_post_change(&stats),
+        WorkflowPhase::PendingImplement => suggest_pending_implement(&stats),
     };
     actions.extend(phase_actions);
 
-    // ── Stagnation detection ────────────────────────────────────────────
     if let Some(warning) = detect_stagnation(&changelog, active_experiments) {
         actions.push(warning);
     }

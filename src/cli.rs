@@ -14,6 +14,7 @@ pub use experiment::ExperimentAction;
 use crate::backup::BackupManager;
 use crate::command::{self, CommandOutput};
 use crate::repo::SqliteRepository;
+use crate::workflow::state::WorkflowPhase;
 use crate::workflow::WorkflowState;
 #[derive(Debug, Parser)]
 #[command(name = "cog", about = "Cognitive model for coding agents", version)]
@@ -246,9 +247,11 @@ impl Cli {
             }
             Commands::Experiment { action } => {
                 let out = self.run_experiment(action, &cog_dir, store)?;
-                // Commit modifies the model; others are reads or file ops
                 if matches!(action, ExperimentAction::Commit { .. }) {
-                    wf.transition_explore();
+                    // Model updated but code not yet changed — track the gap
+                    if let WorkflowState::Ready { phase } = &mut wf {
+                        *phase = WorkflowPhase::PendingImplement;
+                    }
                 }
                 Ok(out)
             }

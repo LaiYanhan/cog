@@ -22,6 +22,7 @@ fn action_kind_label(kind: &ActionKind) -> &'static str {
         ActionKind::CommitExperiment => "descent",
         ActionKind::RecoverContext => "recover",
         ActionKind::RecordConstraint => "model",
+        ActionKind::ImplementPlanned => "descent",
     }
 }
 
