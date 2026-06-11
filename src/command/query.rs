@@ -10,6 +10,7 @@ pub fn execute(
     entity: &str,
     all: bool,
     compact: bool,
+    relations: bool,
     output: OutputFormat,
 ) -> Result<CommandOutput> {
     let entity_record = repo.resolve_entity(entity)?;
@@ -32,6 +33,7 @@ pub fn execute(
             entity: entity_record,
             assertions: assertions_with_evidence,
             related,
+            relations_detail: relations,
         };
         Ok(CommandOutput::success(format::emit_report(&card, output)))
     }
@@ -63,7 +65,14 @@ mod tests {
             None,
         )?;
 
-        let output = execute(&store, "auth::login", false, false, OutputFormat::Text)?;
+        let output = execute(
+            &store,
+            "auth::login",
+            false,
+            false,
+            true,
+            OutputFormat::Text,
+        )?;
         assert_eq!(output.exit_code, 0);
         assert!(output.text.contains("auth::login"));
         assert!(output.text.contains("returns option token"));

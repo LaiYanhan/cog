@@ -9,6 +9,7 @@ impl TextRenderer {
         entity: &Entity,
         assertions: &[(Assertion, Vec<Evidence>)],
         related: &[RelatedEntity],
+        relations_detail: bool,
     ) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "{} [{}]", entity.qualified_name, entity.kind);
@@ -41,29 +42,134 @@ impl TextRenderer {
         }
 
         if !related.is_empty() {
-            let _ = writeln!(out);
-            let _ = writeln!(out, "relations ({}):", related.len());
-            for entry in related {
-                match entry.direction {
-                    RelationDirection::Outgoing => {
-                        let _ = writeln!(
-                            out,
-                            "  -> {} {} [{}]",
-                            entry.kind, entry.entity.qualified_name, entry.entity.kind
-                        );
-                    }
-                    RelationDirection::Incoming => {
-                        let _ = writeln!(
-                            out,
-                            "  <- {} {} [{}]",
-                            entry.kind, entry.entity.qualified_name, entry.entity.kind
-                        );
-                    }
-                }
+            if relations_detail {
+                Self::render_relations_full(&mut out, related);
+            } else {
+                Self::render_relations_summary(&mut out, related);
             }
         }
 
         out
+    }
+
+    /// Full relation listing (with `--relations` flag).
+    fn render_relations_full(out: &mut String, related: &[RelatedEntity]) {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "relations ({}):", related.len());
+        for entry in related {
+            match entry.direction {
+                RelationDirection::Outgoing => {
+                    let _ = writeln!(
+                        out,
+                        "  -> {} {} [{}]",
+                        entry.kind, entry.entity.qualified_name, entry.entity.kind
+                    );
+                }
+                RelationDirection::Incoming => {
+                    let _ = writeln!(
+                        out,
+                        "  <- {} {} [{}]",
+                        entry.kind, entry.entity.qualified_name, entry.entity.kind
+                    );
+                }
+            }
+        }
+    }
+
+    fn render_relations_summary(out: &mut String, related: &[RelatedEntity]) {
+        use std::collections::HashMap;
+
+        // Group by (direction, kind)
+        let mut groups: HashMap<(RelationDirection, EntityRelationKind), Vec<&str>> =
+            HashMap::new();
+        for entry in related {
+            groups
+                .entry((entry.direction, entry.kind))
+                .or_default()
+                .push(crate::domain::entity::last_segment(
+                    &entry.entity.qualified_name,
+                ));
+        }
+
+        let _ = writeln!(out);
+        let _ = writeln!(out, "relations ({}):", related.len());
+
+        const MAX_EXAMPLES: usize = 5;
+        // Stable output order for the 6 known (direction, kind) combinations.
+        let order = [
+            (RelationDirection::Outgoing, EntityRelationKind::Calls),
+            (RelationDirection::Outgoing, EntityRelationKind::Contains),
+            (RelationDirection::Outgoing, EntityRelationKind::Uses),
+            (RelationDirection::Incoming, EntityRelationKind::Calls),
+            (RelationDirection::Incoming, EntityRelationKind::Contains),
+            (RelationDirection::Incoming, EntityRelationKind::Uses),
+        ];
+
+        let mut rendered = std::collections::HashSet::new();
+        for key in &order {
+            if let Some(names) = groups.get(key) {
+                let (dir, kind) = key;
+                let arrow = match dir {
+                    RelationDirection::Outgoing => "→",
+                    RelationDirection::Incoming => "←",
+                };
+                let label = match (dir, kind) {
+                    (RelationDirection::Outgoing, EntityRelationKind::Calls) => "calls".to_string(),
+                    (RelationDirection::Outgoing, EntityRelationKind::Contains) => {
+                        "contains".to_string()
+                    }
+                    (RelationDirection::Incoming, EntityRelationKind::Calls) => {
+                        "called-by".to_string()
+                    }
+                    (RelationDirection::Incoming, EntityRelationKind::Contains) => {
+                        "contained-by".to_string()
+                    }
+                    _ => kind.to_string(),
+                };
+                let extra = if names.len() > MAX_EXAMPLES {
+                    format!(", +{}", names.len() - MAX_EXAMPLES)
+                } else {
+                    String::new()
+                };
+                let examples: Vec<&str> = names.iter().take(MAX_EXAMPLES).copied().collect();
+                let _ = writeln!(
+                    out,
+                    "  {} {} {} ({}{})",
+                    arrow,
+                    label,
+                    names.len(),
+                    examples.join(", "),
+                    extra
+                );
+                rendered.insert(key);
+            }
+        }
+        // Catch-all for any combos not in the explicit order (future-proof).
+        for (key, names) in &groups {
+            if rendered.contains(&key) {
+                continue;
+            }
+            let (dir, kind) = key;
+            let arrow = match dir {
+                RelationDirection::Outgoing => "→",
+                RelationDirection::Incoming => "←",
+            };
+            let examples: Vec<&str> = names.iter().take(MAX_EXAMPLES).copied().collect();
+            let extra = if names.len() > MAX_EXAMPLES {
+                format!(", +{}", names.len() - MAX_EXAMPLES)
+            } else {
+                String::new()
+            };
+            let _ = writeln!(
+                out,
+                "  {} {} {} ({}{})",
+                arrow,
+                kind,
+                names.len(),
+                examples.join(", "),
+                extra
+            );
+        }
     }
 
     pub fn query_compact(entity: &Entity, assertions: &[(Assertion, Vec<Evidence>)]) -> String {
@@ -272,13 +378,6 @@ impl TextRenderer {
             let _ = writeln!(out, "No dependents found via Calls / Uses edges.");
             let _ = writeln!(out, "For structural hierarchy, use: cog query <entity>");
         }
-
-        let _ = writeln!(out);
-        let _ = writeln!(
-            out,
-            "Next: Test your plan safely: cog experiment try {} --kind correction --claim \\\"...\\\" --grounds \\\"code:{}\\\" --desc \\\"...\\\"",
-            result.entity.qualified_name, result.entity.qualified_name
-        );
 
         out
     }
@@ -714,42 +813,13 @@ impl TextRenderer {
         }
         let _ = writeln!(out, "\nScout before implementing:");
 
-        // Render verify scouts individually (they carry unique contradiction info).
-        for s in scouts {
-            if s.action == ScoutAction::Verify {
-                let _ = writeln!(out, "  [verify] {} — {}", s.entity_name, s.reason);
-            }
-        }
-
-        // Collapse blind [assert] entries to count + sample.
+        // Blind entities: count only — individual names are not actionable.
         let blind: Vec<&ScoutSuggestion> = scouts
             .iter()
             .filter(|s| s.action == ScoutAction::Assert)
             .collect();
         if !blind.is_empty() {
-            let sample_max = 4usize;
-            let sample_names: Vec<&str> = blind
-                .iter()
-                .take(sample_max)
-                .map(|s| s.entity_name.as_str())
-                .collect();
-            if blind.len() <= sample_max {
-                let _ = writeln!(
-                    out,
-                    "  [assert] {} blind entities: {}",
-                    blind.len(),
-                    sample_names.join(", ")
-                );
-            } else {
-                let remaining = blind.len() - sample_max;
-                let _ = writeln!(
-                    out,
-                    "  [assert] {} blind entities, e.g. {} ... and {} more",
-                    blind.len(),
-                    sample_names.join(", "),
-                    remaining
-                );
-            }
+            let _ = writeln!(out, "  [assert] {} blind entities in subgraph", blind.len());
         }
 
         out

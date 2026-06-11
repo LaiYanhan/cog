@@ -138,6 +138,7 @@ impl Cli {
                     &args.entity,
                     args.all,
                     args.compact,
+                    args.relations,
                     self.output,
                 )?;
                 wf.transition_explore();
@@ -175,7 +176,7 @@ impl Cli {
                         claim: &args.claim,
                         grounds: &args.grounds,
                         depends_on: args.depends_on.as_deref(),
-                        replace: args.replace,
+                        replace_id: args.replace.as_deref(),
                         force: args.force,
                         output: self.output,
                     },

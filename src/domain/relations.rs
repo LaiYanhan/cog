@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::Entity;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, ValueEnum)]
 pub enum EntityRelationKind {
     Contains,
     Calls,
@@ -60,8 +59,7 @@ impl FromStr for AssertionRelationKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum RelationDirection {
     Outgoing,
     Incoming,

@@ -29,7 +29,12 @@ impl Renderable for ModelStats {
 
 impl Renderable for QueryCard {
     fn render_text(&self) -> String {
-        TextRenderer::query_report(&self.entity, &self.assertions, &self.related)
+        TextRenderer::query_report(
+            &self.entity,
+            &self.assertions,
+            &self.related,
+            self.relations_detail,
+        )
     }
 }
 

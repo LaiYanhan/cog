@@ -14,6 +14,9 @@ pub struct QueryArgs {
     /// Compact mode — one assertion per line, no evidence or relations
     #[arg(long)]
     pub compact: bool,
+    /// Show full relation list (default: summary by kind)
+    #[arg(long, short = 'r')]
+    pub relations: bool,
 }
 
 #[derive(Debug, Args)]
@@ -63,10 +66,10 @@ pub struct AssertArgs {
     /// ID of another assertion this depends on
     #[arg(long)]
     pub depends_on: Option<String>,
-    /// Retract existing active assertions of same kind on this entity before creating
+    /// Retract a specific assertion by ID, then create this new one
     #[arg(long, conflicts_with = "force")]
-    pub replace: bool,
-    /// Create alongside existing active assertions of same kind (use for independent aspects)
+    pub replace: Option<String>,
+    /// Create alongside existing active assertions (when this covers a different aspect)
     #[arg(long, conflicts_with = "replace")]
     pub force: bool,
 }
