@@ -244,7 +244,14 @@ impl Cli {
                 wf.transition_browse();
                 Ok(out)
             }
-            Commands::Experiment { action } => self.run_experiment(action, &cog_dir, store),
+            Commands::Experiment { action } => {
+                let out = self.run_experiment(action, &cog_dir, store)?;
+                // Commit modifies the model; others are reads or file ops
+                if matches!(action, ExperimentAction::Commit { .. }) {
+                    wf.transition_explore();
+                }
+                Ok(out)
+            }
             Commands::Backup { action } => self.run_backup(action, store),
             Commands::Sync(args) => {
                 let lang_list: Option<Vec<String>> = args
@@ -271,7 +278,13 @@ impl Cli {
                 }
                 Ok(out)
             }
-            Commands::Recover { apply } => command::recover::execute(store, *apply, self.output),
+            Commands::Recover { apply } => {
+                let out = command::recover::execute(store, *apply, self.output)?;
+                if *apply {
+                    wf.transition_explore();
+                }
+                Ok(out)
+            }
             Commands::Next(_) => command::next_cmd::execute(store, &wf, &cog_dir, self.output),
         };
 

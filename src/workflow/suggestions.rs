@@ -93,14 +93,49 @@ fn suggest_exploring(
     repo: &dyn Repository,
     stats: &ModelStats,
     coverage_pct: f64,
+    changelog: &[ChangelogEntry],
 ) -> Vec<SuggestedAction> {
     let mut actions = Vec::new();
-    actions.push(SuggestedAction {
-        action: ActionKind::AssessImpact,
-        description: "Run impact analysis to understand downstream dependencies.".into(),
-        example_command: "cog impact <core_entity>".into(),
-    });
 
+    // ── Context from recent activity ─────────────────────────────────
+    // Extract entities the agent recently asserted on, to give targeted suggestions
+    // instead of generic "run impact" advice.
+    let mut recent_entities: Vec<String> = Vec::new();
+    for entry in changelog.iter().rev() {
+        if entry.action == ChangelogAction::Assert
+            && let Some(name) = entry.detail.strip_prefix("entity=")
+        {
+            let name = match name.find(' ') {
+                Some(end) => &name[..end],
+                None => name,
+            };
+            if !recent_entities.contains(&name.to_string()) {
+                recent_entities.push(name.to_string());
+            }
+            if recent_entities.len() >= 3 {
+                break;
+            }
+        }
+    }
+
+    if let Some(first) = recent_entities.first() {
+        actions.push(SuggestedAction {
+            action: ActionKind::AssessImpact,
+            description: format!(
+                "Check downstream impact of {} before making changes.",
+                first
+            ),
+            example_command: format!("cog impact {first}"),
+        });
+    } else {
+        actions.push(SuggestedAction {
+            action: ActionKind::AssessImpact,
+            description: "Run impact analysis to understand downstream dependencies.".into(),
+            example_command: "cog impact <core_entity>".into(),
+        });
+    }
+
+    // ── Coverage-guided suggestions ──────────────────────────────────
     if coverage_pct > COVERAGE_REFINE_THRESHOLD {
         actions.push(SuggestedAction {
             action: ActionKind::VerifyConsistency,
@@ -138,17 +173,56 @@ fn suggest_exploring(
             });
         }
     }
+
+    // ── Deepen knowledge on recently worked entities ──────────────────
+    // If agent recently recorded contracts but no invariants/fragilities,
+    // suggest adding deeper knowledge.
+    if !recent_entities.is_empty() && coverage_pct >= 20.0 {
+        let sample = &recent_entities[0];
+        actions.push(SuggestedAction {
+            action: ActionKind::RecordMissingContracts,
+            description: format!(
+                "Deepen knowledge on {} — add invariant or fragility assertions for key constraints.",
+                sample
+            ),
+            example_command: format!(
+                "cog assert {sample} --kind invariant --claim \"<key constraint>\" --grounds \"code:{sample}\""
+            ),
+        });
+    }
+
     actions
 }
 
-fn suggest_post_change() -> Vec<SuggestedAction> {
-    vec![SuggestedAction {
+fn suggest_post_change(stats: &ModelStats) -> Vec<SuggestedAction> {
+    let mut actions = Vec::new();
+
+    actions.push(SuggestedAction {
         action: ActionKind::RecordFix,
         description: "Code changed. Record corrections for changed entities.".into(),
         example_command:
             "cog assert <entity> --kind correction --claim \"...\" --grounds \"code:<entity>\""
                 .into(),
-    }]
+    });
+
+    actions.push(SuggestedAction {
+        action: ActionKind::VerifyConsistency,
+        description: "Run verify to check model consistency after code changes.".into(),
+        example_command: "cog verify --scan".into(),
+    });
+
+    if stats.uncertain_assertions > 0 {
+        actions.push(SuggestedAction {
+            action: ActionKind::ReviewUncertainAssertions,
+            description: format!(
+                "{} uncertain assertion(s) exist. Check if any can be recovered.",
+                stats.uncertain_assertions
+            ),
+            example_command: "cog recover".into(),
+        });
+    }
+
+    actions
 }
 fn suggest_debugging(stats: &ModelStats, changelog: &[ChangelogEntry]) -> Vec<SuggestedAction> {
     let mut actions = Vec::new();
@@ -270,8 +344,8 @@ fn suggest_for_ready(
     let phase_actions = match phase {
         WorkflowPhase::FreshScan => suggest_fresh_scan(repo, &stats),
         WorkflowPhase::Debugging => suggest_debugging(&stats, &changelog),
-        WorkflowPhase::Exploring => suggest_exploring(repo, &stats, coverage_pct),
-        WorkflowPhase::PostChange => suggest_post_change(),
+        WorkflowPhase::Exploring => suggest_exploring(repo, &stats, coverage_pct, &changelog),
+        WorkflowPhase::PostChange => suggest_post_change(&stats),
     };
     actions.extend(phase_actions);
 
