@@ -1,8 +1,8 @@
 use std::fmt::Write;
 
-use crate::domain::{AssertedEntity, MAX_ASSERTED, partition_by_assertion};
 use crate::domain::entity::last_segment;
 use crate::domain::*;
+use crate::domain::{AssertedEntity, MAX_ASSERTED, partition_by_assertion};
 
 // ---------------------------------------------------------------------------
 // Shared assertion-aware render helpers
@@ -15,10 +15,7 @@ fn render_asserted_entities(out: &mut String, asserted: &[AssertedEntity], inden
         let _ = writeln!(
             out,
             "{}{} [{}]  {} active",
-            indent,
-            ae.entity.qualified_name,
-            ae.entity.kind,
-            ae.active_assertions
+            indent, ae.entity.qualified_name, ae.entity.kind, ae.active_assertions
         );
     }
     let remaining = asserted.len().saturating_sub(MAX_ASSERTED);

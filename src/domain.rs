@@ -14,7 +14,7 @@ pub mod risk;
 // Re-export core types for convenience
 pub use assertion::{Assertion, AssertionKind, AssertionStatus, short_id};
 pub use changelog::{ChangelogAction, ChangelogEntry};
-pub use display::{AssertedEntity, partition_by_assertion, MAX_ASSERTED};
+pub use display::{AssertedEntity, MAX_ASSERTED, partition_by_assertion};
 pub use entity::{Entity, EntityKind, EntityOrigin, parent_qname};
 pub use evidence::Evidence;
 pub use relations::{
