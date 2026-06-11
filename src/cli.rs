@@ -64,6 +64,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: BackupAction,
     },
+    /// Recover Uncertain assertions whose dependencies are all Active again
+    Recover {
+        /// Apply recovery (default is dry-run preview)
+        #[arg(long)]
+        apply: bool,
+    },
     /// Show suggested next actions based on current workflow state
     Next(NextArgs),
     /// Sync the cognitive model with the codebase (idempotent). Use --init to create a new model.
@@ -246,9 +252,17 @@ impl Cli {
                     .as_ref()
                     .map(|s| s.split(',').map(|l| l.trim().to_string()).collect());
                 let db = self.db_path();
-                let out =
-                    command::sync_cmd::execute(store, &db, args.dry_run, lang_list, self.output)?;
-                if out.exit_code == 0 && !args.dry_run {
+                let dry_run = args.dry_run;
+                let output = self.output;
+                let out = if dry_run {
+                    command::sync_cmd::execute(store, &db, true, lang_list, output)?
+                } else {
+                    // Wrap non-dry-run sync in a transaction for atomicity
+                    store.transaction(|| {
+                        command::sync_cmd::execute(store, &db, false, lang_list, output)
+                    })?
+                };
+                if out.exit_code == 0 && !dry_run {
                     if matches!(wf, WorkflowState::Uninit) {
                         wf.transition_init().ok();
                     } else {
@@ -257,6 +271,7 @@ impl Cli {
                 }
                 Ok(out)
             }
+            Commands::Recover { apply } => command::recover::execute(store, *apply, self.output),
             Commands::Next(_) => command::next_cmd::execute(store, &wf, &cog_dir, self.output),
         };
 
@@ -330,7 +345,10 @@ impl Cli {
         match action {
             Create { name } => command::backup_cmd::create(store, &mgr, name.clone()),
             List => command::backup_cmd::list(&mgr),
-            Restore { name } => command::backup_cmd::restore(&mgr, name),
+            Restore { name } => {
+                store.checkpoint_wal()?;
+                command::backup_cmd::restore(&mgr, name)
+            }
             Drop { name } => command::backup_cmd::drop(&mgr, name),
         }
     }
@@ -341,7 +359,10 @@ impl Cli {
         cog_dir: &Path,
         result: Result<CommandOutput>,
     ) -> Result<CommandOutput> {
-        let _ = wf.save(cog_dir);
+        if let Err(e) = wf.save(cog_dir) {
+            // Log but don't fail — the command output is more important.
+            eprintln!("warning: failed to save workflow state: {e}");
+        }
         result
     }
 }

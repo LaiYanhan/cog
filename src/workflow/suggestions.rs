@@ -32,6 +32,7 @@ pub enum ActionKind {
     ImplementNow,
     CommitExperiment,
     RecoverContext,
+    RecordConstraint,
 }
 
 // ── Public entry point ──────────────────────────────────────────────────────
@@ -208,6 +209,13 @@ fn suggest_debugging(stats: &ModelStats, changelog: &[ChangelogEntry]) -> Vec<Su
     }
 
     // ── Fallback: no model signals to guide recovery ──────────────────
+
+    // ── Constraint capture: record root cause as invariant ────────────
+    actions.push(SuggestedAction {
+        action: ActionKind::RecordConstraint,
+        description: "If you fixed a bug, record the constraint it violated as an invariant or fragility assertion.".into(),
+        example_command: "cog assert <entity> --kind invariant --claim \"<what constraint was violated>\" --grounds \"issue:<id>\"".into(),
+    });
     if actions.is_empty() {
         actions.push(SuggestedAction {
             action: ActionKind::RecoverContext,
@@ -505,11 +513,11 @@ mod tests {
         ];
         let actions = suggest_debugging(&empty_stats(), &changelog);
 
-        // No corrections, no retractions, no uncertain → fallback only
+        // No corrections, no retractions, no uncertain → only RecordConstraint
         assert!(
             actions
                 .iter()
-                .any(|a| matches!(a.action, ActionKind::RecoverContext))
+                .any(|a| matches!(a.action, ActionKind::RecordConstraint))
         );
         assert!(!actions[0].description.contains("foo"));
     }
@@ -574,9 +582,13 @@ mod tests {
     #[test]
     fn debug_fallback_when_no_signals() {
         let actions = suggest_debugging(&empty_stats(), &[]);
-        assert_eq!(actions.len(), 1);
-        assert!(matches!(actions[0].action, ActionKind::RecoverContext));
-        assert!(actions[0].description.contains("requirements"));
+        // RecordConstraint is always present; RecoverContext no longer needed as fallback
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a.action, ActionKind::RecordConstraint))
+        );
+        assert!(actions[0].description.contains("constraint"));
     }
 
     // ── No generic trace/verify ────────────────────────────────────────

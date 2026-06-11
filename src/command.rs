@@ -8,6 +8,7 @@ pub mod impact;
 pub mod index_cmd;
 pub mod next_cmd;
 pub mod query;
+pub mod recover;
 pub mod retract;
 pub mod stats;
 pub mod sync_cmd;

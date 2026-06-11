@@ -21,6 +21,7 @@ fn action_kind_label(kind: &ActionKind) -> &'static str {
         ActionKind::ImplementNow => "descent",
         ActionKind::CommitExperiment => "descent",
         ActionKind::RecoverContext => "recover",
+        ActionKind::RecordConstraint => "model",
     }
 }
 

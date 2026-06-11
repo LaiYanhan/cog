@@ -8,7 +8,8 @@ use crate::analysis::report::ScanReport;
 use crate::analysis::{Language, ScanConfig, Scanner};
 use crate::command::CommandOutput;
 use crate::domain::{
-    ChangelogAction, EntityKind, EntityOrigin, EntityRelationKind, SyncReport, parent_qname,
+    Assertion, AssertionStatus, ChangelogAction, EntityKind, EntityOrigin, EntityRelationKind,
+    SyncReport, parent_qname,
 };
 use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
@@ -433,6 +434,7 @@ fn build_report(
     skipped: &[String],
     after_entities: usize,
     after_assertions: usize,
+    affected_assertions: Vec<(String, Assertion)>,
 ) -> SyncReport {
     let has_drift = !removed.is_empty() || (!skipped.is_empty());
 
@@ -467,6 +469,7 @@ fn build_report(
         has_drift,
         after_entities,
         after_assertions,
+        affected_assertions,
     }
 }
 
@@ -535,6 +538,7 @@ pub fn execute(
             has_drift: false,
             after_entities: 0,
             after_assertions: 0,
+            affected_assertions: vec![],
         };
         return Ok(CommandOutput::success(format::emit_report(&report, output)));
     }
@@ -550,6 +554,19 @@ pub fn execute(
     // Drift cleanup
     let scanned_names = collect_scanned_names(&result, &scan_root);
     let (removed, skipped) = remove_stale_entities(repo, &scanned_names)?;
+
+    // Collect assertions on stale-skipped entities (they have assertions that may need review)
+    let mut affected_assertions: Vec<(String, Assertion)> = Vec::new();
+    for name in &skipped {
+        if let Ok(Some(entity)) = repo.get_entity_by_name(name)
+            && let Ok(assertions) = repo.get_assertions_for_entity(&entity.id) {
+                for a in assertions {
+                    if a.status == AssertionStatus::Active {
+                        affected_assertions.push((name.clone(), a));
+                    }
+                }
+            }
+    }
 
     // Changelog
     repo.append_changelog(
@@ -576,6 +593,7 @@ pub fn execute(
         &skipped,
         after_entities,
         after_assertions,
+        affected_assertions,
     );
 
     let mut out = CommandOutput::success(format::emit_report(&report, output));

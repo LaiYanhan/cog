@@ -174,6 +174,10 @@ pub struct SyncReport {
     pub has_drift: bool,
     pub after_entities: usize,
     pub after_assertions: usize,
+    /// Assertions on stale-skipped entities — these may need review.
+    /// Each entry is (entity_name, assertion).
+    #[serde(default)]
+    pub affected_assertions: Vec<(String, Assertion)>,
 }
 
 /// Result of a `cog verify` command.

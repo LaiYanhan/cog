@@ -280,9 +280,10 @@ impl TextRenderer {
             let _ = writeln!(out);
             let _ = writeln!(
                 out,
-                "{} now has {} active assertions:",
+                "{} now has {} active assertion{}:",
                 entity_name,
-                active.len()
+                active.len(),
+                if active.len() == 1 { "" } else { "s" }
             );
             let mut has_uncertain = false;
             for (assertion, _) in remaining_assertions {
@@ -504,11 +505,12 @@ impl TextRenderer {
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "{} now has {} active assertions:",
+            "{} now has {} active assertion{}:",
             entity.qualified_name,
-            active.len()
+            active.len(),
+            if active.len() == 1 { "" } else { "s" }
         );
-        for (i, (a, _)) in existing_assertions.iter().enumerate() {
+        for (i, (a, _)) in active.iter().enumerate() {
             let new_tag = if a.id == assertion.id {
                 "    [new]"
             } else {
@@ -535,7 +537,7 @@ impl TextRenderer {
                 assertion.kind
             );
             // Find an existing assertion of the same kind to suggest retracting
-            if let Some((old_a, _)) = existing_assertions
+            if let Some((old_a, _)) = active
                 .iter()
                 .find(|(a, _)| a.kind == assertion.kind && a.id != assertion.id)
             {
@@ -669,6 +671,29 @@ impl TextRenderer {
             for name in &report.stale_skipped {
                 let _ = writeln!(out, "  - {name}  (use `cog delete-entity {name}` to force)");
             }
+        }
+
+        // Show assertions on stale-skipped entities that may need review
+        if !report.affected_assertions.is_empty() {
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "Assertions potentially affected ({}):",
+                report.affected_assertions.len()
+            );
+            for (entity_name, assertion) in &report.affected_assertions {
+                let id = crate::domain::short_id(&assertion.id);
+                let _ = writeln!(
+                    out,
+                    "  [{}] {} on {}: \"{}\"",
+                    id, assertion.kind, entity_name, assertion.claim
+                );
+            }
+            let _ = writeln!(
+                out,
+                "Review with: cog query {}",
+                report.affected_assertions[0].0
+            );
         }
 
         let _ = writeln!(out);
