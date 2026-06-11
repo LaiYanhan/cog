@@ -44,7 +44,6 @@ impl From<&str> for Grounds {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

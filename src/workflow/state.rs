@@ -141,42 +141,77 @@ mod tests {
     fn init_from_uninit() {
         let mut state = WorkflowState::Uninit;
         state.transition_init().unwrap();
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::FreshScan });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::FreshScan
+            }
+        );
     }
 
     #[test]
     fn init_from_ready_fails() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::FreshScan };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::FreshScan,
+        };
         let err = state.transition_init().unwrap_err();
         assert!(err.to_string().contains("project already initialized"));
     }
 
     #[test]
     fn verify_pass_from_debugging() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::Debugging };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::Debugging,
+        };
         state.transition_verify(true);
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::Exploring });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Exploring
+            }
+        );
     }
 
     #[test]
     fn verify_fail_from_debugging() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::Debugging };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::Debugging,
+        };
         state.transition_verify(false);
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::Debugging });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Debugging
+            }
+        );
     }
 
     #[test]
     fn verify_from_exploring_no_change() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::Exploring };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::Exploring,
+        };
         state.transition_verify(true);
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::Exploring });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Exploring
+            }
+        );
     }
 
     #[test]
     fn retract_enters_debugging() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::Exploring };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::Exploring,
+        };
         state.transition_retract();
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::Debugging });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Debugging
+            }
+        );
     }
 
     #[test]
@@ -188,37 +223,72 @@ mod tests {
 
     #[test]
     fn explore_from_fresh_scan() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::FreshScan };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::FreshScan,
+        };
         state.transition_explore();
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::Exploring });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Exploring
+            }
+        );
     }
 
     #[test]
     fn explore_from_post_change() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::PostChange };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::PostChange,
+        };
         state.transition_explore();
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::Exploring });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Exploring
+            }
+        );
     }
 
     #[test]
     fn explore_from_debugging_stays() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::Debugging };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::Debugging,
+        };
         state.transition_explore();
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::Debugging });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Debugging
+            }
+        );
     }
 
     #[test]
     fn sync_drift_enters_post_change() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::Exploring };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::Exploring,
+        };
         state.transition_sync(true);
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::PostChange });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::PostChange
+            }
+        );
     }
 
     #[test]
     fn sync_no_drift_stays() {
-        let mut state = WorkflowState::Ready { phase: WorkflowPhase::Exploring };
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::Exploring,
+        };
         state.transition_sync(false);
-        assert_eq!(state, WorkflowState::Ready { phase: WorkflowPhase::Exploring });
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Exploring
+            }
+        );
     }
 
     #[test]
@@ -229,7 +299,9 @@ mod tests {
 
     #[test]
     fn describe_ready_exploring() {
-        let state = WorkflowState::Ready { phase: WorkflowPhase::Exploring };
+        let state = WorkflowState::Ready {
+            phase: WorkflowPhase::Exploring,
+        };
         assert_eq!(state.describe(), "ready (exploring)");
     }
 }

@@ -102,7 +102,6 @@ impl FromStr for AssertionStatus {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

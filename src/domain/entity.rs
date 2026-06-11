@@ -145,7 +145,6 @@ impl Entity {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,7 +156,10 @@ mod tests {
 
     #[test]
     fn infer_qualified_uppercase_is_type() {
-        assert_eq!(EntityKind::infer("cog::repo::SqliteRepository"), EntityKind::Type);
+        assert_eq!(
+            EntityKind::infer("cog::repo::SqliteRepository"),
+            EntityKind::Type
+        );
     }
 
     #[test]
@@ -172,7 +174,10 @@ mod tests {
 
     #[test]
     fn last_segment_qualified() {
-        assert_eq!(last_segment("cog::repo::sqlite::SqliteRepository"), "SqliteRepository");
+        assert_eq!(
+            last_segment("cog::repo::sqlite::SqliteRepository"),
+            "SqliteRepository"
+        );
     }
 
     #[test]
@@ -182,7 +187,10 @@ mod tests {
 
     #[test]
     fn parent_qname_qualified() {
-        assert_eq!(parent_qname("cog::repo::sqlite::SqliteRepository"), Some("cog::repo::sqlite"));
+        assert_eq!(
+            parent_qname("cog::repo::sqlite::SqliteRepository"),
+            Some("cog::repo::sqlite")
+        );
     }
 
     #[test]
