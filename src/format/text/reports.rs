@@ -1,6 +1,44 @@
 use std::fmt::Write;
 
+use crate::domain::{AssertedEntity, MAX_ASSERTED, partition_by_assertion};
+use crate::domain::entity::last_segment;
 use crate::domain::*;
+
+// ---------------------------------------------------------------------------
+// Shared assertion-aware render helpers
+// ---------------------------------------------------------------------------
+
+/// Expand asserted entities: one line each with qualified name, kind, count.
+/// Caps at `MAX_ASSERTED`, folds remainder into `+ N more`.
+fn render_asserted_entities(out: &mut String, asserted: &[AssertedEntity], indent: &str) {
+    for ae in asserted.iter().take(MAX_ASSERTED) {
+        let _ = writeln!(
+            out,
+            "{}{} [{}]  {} active",
+            indent,
+            ae.entity.qualified_name,
+            ae.entity.kind,
+            ae.active_assertions
+        );
+    }
+    let remaining = asserted.len().saturating_sub(MAX_ASSERTED);
+    if remaining > 0 {
+        let _ = writeln!(out, "{}+ {} more asserted", indent, remaining);
+    }
+}
+/// Collapse blind entities: write comma-separated short names (up to `sample_max`),
+fn render_blind_entities(out: &mut String, blind: &[AssertedEntity], sample_max: usize) {
+    let names: Vec<&str> = blind
+        .iter()
+        .take(sample_max)
+        .map(|ae| last_segment(&ae.entity.qualified_name))
+        .collect();
+    let _ = write!(out, "{}", names.join(", "));
+    if blind.len() > sample_max {
+        let remaining = blind.len() - sample_max;
+        let _ = write!(out, ", +{}", remaining);
+    }
+}
 
 use super::TextRenderer;
 
@@ -150,51 +188,25 @@ impl TextRenderer {
             _ => kind.to_string(),
         };
 
-        // Partition by assertion count.
-        let (asserted, blind): (Vec<&&RelatedEntity>, Vec<&&RelatedEntity>) = entries
+        // Convert to (Entity, assertion_count) pairs and partition.
+        let pairs: Vec<(Entity, usize)> = entries
             .iter()
-            .partition(|e| assertion_counts.get(&e.entity.id).copied().unwrap_or(0) > 0);
-
-        const MAX_EXAMPLES: usize = 5;
+            .map(|e| {
+                let count = assertion_counts.get(&e.entity.id).copied().unwrap_or(0);
+                (e.entity.clone(), count)
+            })
+            .collect();
+        let (asserted, blind) = partition_by_assertion(pairs);
 
         if asserted.is_empty() {
-            // All blind — compact one-liner.
-            let names: Vec<&str> = entries
-                .iter()
-                .take(MAX_EXAMPLES)
-                .map(|e| crate::domain::entity::last_segment(&e.entity.qualified_name))
-                .collect();
-            let extra = if entries.len() > MAX_EXAMPLES {
-                format!(", +{}", entries.len() - MAX_EXAMPLES)
-            } else {
-                String::new()
-            };
-            let _ = writeln!(
-                out,
-                "  {} {} {} ({}{})",
-                arrow,
-                label,
-                entries.len(),
-                names.join(", "),
-                extra
-            );
+            // All blind — compact one-liner: arrow label N (names, +M)
+            let _ = write!(out, "  {} {} {} (", arrow, label, entries.len());
+            render_blind_entities(out, &blind, 5);
+            let _ = writeln!(out, ")");
         } else {
-            // Has asserted entities — multi-line with assertion counts.
-            // TODO: MAX_ASSERTED should eventually come from user config.
-            let max = crate::domain::display::MAX_ASSERTED;
+            // Has asserted — multi-line: expand asserted, append blind count.
             let _ = writeln!(out, "  {} {} {}:", arrow, label, entries.len());
-            for ae in asserted.iter().take(max) {
-                let count = assertion_counts.get(&ae.entity.id).copied().unwrap_or(0);
-                let _ = writeln!(
-                    out,
-                    "    {} [{}]  {} active",
-                    ae.entity.qualified_name, ae.entity.kind, count
-                );
-            }
-            let remaining = asserted.len().saturating_sub(max);
-            if remaining > 0 {
-                let _ = writeln!(out, "    + {} more asserted", remaining);
-            }
+            render_asserted_entities(out, &asserted, "    ");
             if !blind.is_empty() {
                 let _ = writeln!(out, "    + {} blind", blind.len());
             }
@@ -359,50 +371,15 @@ impl TextRenderer {
             if !covered.is_empty() {
                 let _ = writeln!(out);
                 let _ = writeln!(out, "Covered dependents:");
-                // TODO: MAX_ASSERTED should eventually come from user config.
-                let max = crate::domain::display::MAX_ASSERTED;
-                for ae in covered.iter().take(max) {
-                    let _ = writeln!(
-                        out,
-                        "  {} [{}]    ({} assertion{})",
-                        ae.entity.qualified_name,
-                        ae.entity.kind,
-                        ae.active_assertions,
-                        if ae.active_assertions == 1 { "" } else { "s" }
-                    );
-                }
-                let remaining = covered.len().saturating_sub(max);
-                if remaining > 0 {
-                    let _ = writeln!(out, "  + {} more covered", remaining);
-                }
+                render_asserted_entities(&mut out, &covered, "  ");
             }
 
             // Blind dependents — no recorded knowledge at risk, collapse to count + samples.
             if !blind.is_empty() {
                 let _ = writeln!(out);
-                let sample_max = 4usize;
-                let sample_names: Vec<&str> = blind
-                    .iter()
-                    .take(sample_max)
-                    .map(|ae| ae.entity.qualified_name.as_str())
-                    .collect();
-                if blind.len() <= sample_max {
-                    let _ = writeln!(
-                        out,
-                        "Blind dependents ({}): {}",
-                        blind.len(),
-                        sample_names.join(", ")
-                    );
-                } else {
-                    let remaining = blind.len() - sample_max;
-                    let _ = writeln!(
-                        out,
-                        "Blind dependents: {} entities, e.g. {} ... and {} more",
-                        blind.len(),
-                        sample_names.join(", "),
-                        remaining
-                    );
-                }
+                let _ = write!(out, "Blind dependents ({}): ", blind.len());
+                render_blind_entities(&mut out, &blind, 4);
+                let _ = writeln!(out);
             }
         } else {
             let _ = writeln!(out);
