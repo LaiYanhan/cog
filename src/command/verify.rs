@@ -91,12 +91,18 @@ fn check_entity_structural_issues(
     for entity in entities {
         let assertions = repo.get_assertions_for_entity(&entity.id)?;
         let relation_count = repo.count_relations_for_entity(&entity.id)?;
-
         let active_count = assertions
             .iter()
             .filter(|a| a.status == AssertionStatus::Active)
             .count();
-        if active_count == 0 && relation_count == 0 {
+        // Non-retracted includes Active + Uncertain — both are valuable knowledge.
+        // Uncertain assertions are recoverable via `cog recover`; deleting the entity
+        // would destroy them.
+        let non_retracted_count = assertions
+            .iter()
+            .filter(|a| a.status != AssertionStatus::Retracted)
+            .count();
+        if non_retracted_count == 0 && relation_count == 0 {
             issues.push(VerificationIssue {
                 kind: VerificationIssueKind::IsolatedEntity,
                 entity_name: Some(entity.qualified_name.clone()),

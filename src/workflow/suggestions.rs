@@ -315,22 +315,12 @@ fn suggest_debugging(stats: &ModelStats, changelog: &[ChangelogEntry]) -> Vec<Su
         });
     }
 
-    // ── Fallback: no model signals to guide recovery ──────────────────
-
     // ── Constraint capture: record root cause as invariant ────────────
     actions.push(SuggestedAction {
         action: ActionKind::RecordConstraint,
         description: "If you fixed a bug, record the constraint it violated as an invariant or fragility assertion.".into(),
         example_command: "cog assert <entity> --kind invariant --claim \"<what constraint was violated>\" --grounds \"issue:<id>\"".into(),
     });
-    if actions.is_empty() {
-        actions.push(SuggestedAction {
-            action: ActionKind::RecoverContext,
-            description: "Read requirements, identify remaining gaps, and continue implementation."
-                .into(),
-            example_command: "cog impact <core_entity>".into(),
-        });
-    }
 
     actions
 }
