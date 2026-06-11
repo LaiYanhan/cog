@@ -52,6 +52,7 @@ pub trait Repository {
     // ── Evidence ────────────────────────────────────────────────────────────
 
     fn get_evidence_for_assertion(&self, assertion_id: &str) -> Result<Vec<Evidence>>;
+    fn get_evidences_for_assertions(&self, assertion_ids: &[String]) -> Result<Vec<Evidence>>;
     fn list_evidences(&self) -> Result<Vec<Evidence>>;
 
     // ── Relations ───────────────────────────────────────────────────────────
@@ -59,6 +60,12 @@ pub trait Repository {
     fn add_entity_relation(&self, from: &str, to: &str, kind: EntityRelationKind) -> Result<()>;
     fn list_entity_relations(&self) -> Result<Vec<EntityRelation>>;
     fn list_assertion_relations(&self) -> Result<Vec<AssertionRelation>>;
+    /// Load assertion relations where both endpoints are in the given set.
+    /// More efficient than list_assertion_relations + filter for large models.
+    fn get_assertion_relations_for(
+        &self,
+        assertion_ids: &[String],
+    ) -> Result<Vec<AssertionRelation>>;
     fn get_dependents(&self, assertion_id: &str) -> Result<Vec<Assertion>>;
     fn get_dependencies(&self, assertion_id: &str) -> Result<Vec<Assertion>>;
     fn get_related_entities(&self, entity_id: &str) -> Result<Vec<RelatedEntity>>;

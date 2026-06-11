@@ -18,12 +18,18 @@ impl CascadeEngine {
         assertion_id: &str,
         reason: &str,
     ) -> Result<CascadeReport> {
-        let current = repo
-            .get_assertion(assertion_id)?
-            .ok_or_else(|| anyhow!("assertion not found: {assertion_id}"))?;
+        let current = repo.get_assertion(assertion_id)?.ok_or_else(|| {
+            anyhow!(
+                "assertion not found: {}",
+                crate::domain::short_id(assertion_id)
+            )
+        })?;
 
         if current.status == AssertionStatus::Retracted {
-            bail!("assertion already retracted: {assertion_id}");
+            bail!(
+                "assertion already retracted: {}",
+                crate::domain::short_id(assertion_id)
+            );
         }
 
         // Clone entity_id before moving `current` into `retracted`.

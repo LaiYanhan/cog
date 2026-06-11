@@ -78,7 +78,7 @@ impl ImpactEngine {
         // Risk assessment: load semantic space and evaluate
         let risk_assessment = SemanticSpace::load(repo, &entity.id)
             .ok()
-            .map(|semantic| semantic.assess_risk(&entity.id, &structure));
+            .map(|semantic| semantic.assess_risk(&entity.id, &entity.qualified_name, &structure));
 
         // Compute per-entity assertion counts
         let downstream_assertion_counts: Vec<usize> = downstream_entities

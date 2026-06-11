@@ -94,6 +94,14 @@ impl SqliteRepository {
             }
         }
     }
+
+    /// Checkpoint the WAL so all pending writes are flushed to the main DB file.
+    /// Must be called before any external file-level operations on the DB.
+    pub fn checkpoint_wal(&self) -> Result<()> {
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .context("failed to checkpoint WAL")
+    }
 }
 
 use crate::domain::*;
@@ -160,6 +168,9 @@ impl Repository for SqliteRepository {
     fn get_evidence_for_assertion(&self, assertion_id: &str) -> Result<Vec<Evidence>> {
         self.get_evidence_for_assertion(assertion_id)
     }
+    fn get_evidences_for_assertions(&self, assertion_ids: &[String]) -> Result<Vec<Evidence>> {
+        self.get_evidences_for_assertions(assertion_ids)
+    }
     fn list_evidences(&self) -> Result<Vec<Evidence>> {
         self.list_evidences()
     }
@@ -171,6 +182,12 @@ impl Repository for SqliteRepository {
     }
     fn list_assertion_relations(&self) -> Result<Vec<AssertionRelation>> {
         self.list_assertion_relations()
+    }
+    fn get_assertion_relations_for(
+        &self,
+        assertion_ids: &[String],
+    ) -> Result<Vec<AssertionRelation>> {
+        self.get_assertion_relations_for(assertion_ids)
     }
     fn get_dependents(&self, assertion_id: &str) -> Result<Vec<Assertion>> {
         self.get_dependents(assertion_id)

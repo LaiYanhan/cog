@@ -102,6 +102,54 @@ impl SqliteRepository {
         Ok(relations)
     }
 
+    pub(super) fn get_assertion_relations_for(
+        &self,
+        assertion_ids: &[String],
+    ) -> Result<Vec<AssertionRelation>> {
+        if assertion_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Build a temporary table of target IDs and join — avoids
+        // SQLite's 999-parameter limit for very large models.
+        self.conn
+            .execute_batch("CREATE TEMP TABLE IF NOT EXISTS _target_ids(id TEXT PRIMARY KEY); DELETE FROM _target_ids;")
+            .context("failed to prepare temp table")?;
+        {
+            let mut ins = self
+                .conn
+                .prepare("INSERT OR IGNORE INTO _target_ids VALUES (?1)")
+                .context("failed to prepare temp insert")?;
+            for id in assertion_ids {
+                ins.execute(params![id])?;
+            }
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT r.id, r.from_assertion, r.to_assertion, r.kind
+                 FROM assertion_relations r
+                 WHERE EXISTS (SELECT 1 FROM _target_ids WHERE id = r.from_assertion)
+                   AND EXISTS (SELECT 1 FROM _target_ids WHERE id = r.to_assertion)",
+            )
+            .context("failed to prepare get_assertion_relations_for statement")?;
+        let mut rows = stmt.query([])?;
+        let mut relations = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .context("failed to iterate assertion relations")?
+        {
+            let kind: String = row.get(3)?;
+            relations.push(AssertionRelation {
+                id: row.get(0)?,
+                from_assertion: row.get(1)?,
+                to_assertion: row.get(2)?,
+                kind: AssertionRelationKind::from_str(&kind)
+                    .map_err(|_| anyhow!("invalid assertion relation kind in db: {kind}"))?,
+            });
+        }
+        Ok(relations)
+    }
+
     pub(super) fn get_dependents(
         &self,
         assertion_id: &str,

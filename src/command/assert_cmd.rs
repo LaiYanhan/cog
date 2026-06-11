@@ -8,7 +8,7 @@ use crate::domain::{AssertionKind, ChangelogAction, StatusMessage};
 use crate::format::TextRenderer;
 use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
-
+use crate::space::CascadeEngine;
 /// Bundled input for `execute`.
 pub struct AssertInput<'a> {
     pub entity: &'a str,
@@ -70,17 +70,10 @@ fn enforce_kind_gate(
                 1,
             ));
         }
-        repo.retract_assertion(&target.id, &format!("replaced by newer {kind} assertion"))
+        let reason = format!("replaced by newer {kind} assertion");
+        // Use cascade engine so dependents of the replaced assertion are notified
+        CascadeEngine::retract(repo, &target.id, &reason)
             .map_err(|e| CommandOutput::with_exit_code(e.to_string(), 1))?;
-        repo.append_changelog(
-            ChangelogAction::Retract,
-            &target.id,
-            &format!(
-                "auto-retracted: replaced by newer {kind} assertion on {}",
-                entity.qualified_name
-            ),
-        )
-        .map_err(|e| CommandOutput::with_exit_code(e.to_string(), 1))?;
         return Ok(vec![target.id.clone()]);
     }
 
@@ -193,10 +186,27 @@ pub fn execute(repo: &dyn Repository, input: AssertInput<'_>) -> Result<CommandO
         .collect::<Result<_>>()?;
     let same_kind = existing
         .iter()
-        .filter(|(a, _)| a.kind == input.kind)
+        .filter(|(a, _)| a.is_active() && a.kind == input.kind)
         .count();
 
-    let msg = format_created_message(&assertion, &entity, &existing, same_kind, &retracted_ids);
+    let mut msg = format_created_message(&assertion, &entity, &existing, same_kind, &retracted_ids);
+
+    // Density warning: if entity participates in relations and model coverage is low, nudge.
+    if let Ok(rel_count) = repo.count_relations_for_entity(&entity.id)
+        && rel_count > 0
+            && let Ok(stats) = repo.stats()
+                && stats.entities > 0 {
+                    let coverage = stats.covered_entities as f64 / stats.entities as f64;
+                    if coverage < 0.5 {
+                        let pct = (coverage * 100.0) as u32;
+                        let _ = writeln!(
+                            msg,
+                            "\nWarning: only {pct}% of entities have assertions. Consider: cog impact {}",
+                            input.entity
+                        );
+                    }
+                }
+
     Ok(CommandOutput::success(format::emit_report(
         &StatusMessage { message: msg },
         input.output,

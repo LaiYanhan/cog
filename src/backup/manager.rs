@@ -58,7 +58,10 @@ impl BackupManager {
         Ok(backups)
     }
 
-    /// Restore from a backup by copying it back to the main DB path.
+    /// Restore from a backup. The caller must checkpoint the WAL on the live
+    /// connection *before* calling this — the file copy is only safe once the
+    /// WAL is flushed. After the copy, stale WAL/SHM sidecar files are removed
+    /// so a fresh connection won't try to replay an outdated WAL.
     pub fn restore(&self, name: &str) -> Result<()> {
         let backup_dir = self
             .db_path
@@ -73,6 +76,13 @@ impl BackupManager {
 
         std::fs::copy(&backup_path, &self.db_path)
             .with_context(|| format!("failed to restore backup {name}"))?;
+
+        // Remove stale WAL/SHM sidecars (SQLite uses <db>-wal and <db>-shm).
+        for suffix in &["-wal", "-shm"] {
+            let mut sidecar = self.db_path.as_os_str().to_owned();
+            sidecar.push(suffix);
+            let _ = std::fs::remove_file(&sidecar);
+        }
 
         Ok(())
     }

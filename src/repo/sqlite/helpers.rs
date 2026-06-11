@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS assertions (
     entity_id TEXT NOT NULL REFERENCES entities(id),
     kind TEXT NOT NULL,
     claim TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'retracted', 'uncertain')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     retraction_reason TEXT

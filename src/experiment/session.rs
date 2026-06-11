@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::*;
 use crate::repo::Repository;
-use crate::space::{SemanticSpace, StructureSpace};
+use crate::space::{CascadeEngine, SemanticSpace, StructureSpace};
 
 use super::ops::ExperimentOp;
 use super::report::{CommitReport, Contradiction, ExperimentReport};
@@ -182,9 +182,9 @@ impl Experiment {
 
         let affected_assertions: Vec<AffectedAssertion> = cascade_affected.clone();
 
-        let risk = self
-            .semantic
-            .assess_risk(&self.entity_focus_id, &self.structure);
+        let risk =
+            self.semantic
+                .assess_risk(&self.entity_focus_id, &self.entity_focus, &self.structure);
 
         Ok(ExperimentReport {
             experiment_id: self.id.clone(),
@@ -259,9 +259,13 @@ impl Experiment {
                     // Resolve short id if needed
                     match repo.resolve_assertion_id(assertion_id) {
                         Ok(resolved) => {
-                            repo.retract_assertion(&resolved, reason)?;
+                            // Use cascade engine so dependents are properly notified
+                            let cascade = CascadeEngine::retract(repo, &resolved, reason)?;
                             applied += 1;
-                            details.push(format!("retracted {assertion_id}: {reason}"));
+                            details.push(format!(
+                                "retracted {assertion_id}: {reason} (cascade: {} affected)",
+                                cascade.affected.len()
+                            ));
                         }
                         Err(_) => {
                             skipped += 1;

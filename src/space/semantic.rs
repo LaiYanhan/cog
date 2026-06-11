@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::domain::RiskAssessment;
 use crate::domain::{
-    AffectedAssertion, Assertion, AssertionStatus, CascadeReason, CascadeReport, Evidence,
+    AffectedAssertion, Assertion, AssertionKind, AssertionStatus, CascadeReason, CascadeReport,
+    Evidence,
 };
 use crate::repo::Repository;
 use crate::space::StructureSpace;
@@ -67,17 +68,30 @@ impl SemanticSpace {
         // Batch-load assertions for all collected entity ids
         let all_assertions = repo.get_assertions_for_entities(&entity_ids)?;
 
+        // Batch-load all evidences in one query, then partition by assertion_id
+        let assertion_ids: Vec<String> = all_assertions.iter().map(|a| a.id.clone()).collect();
+        let all_evidences = repo.get_evidences_for_assertions(&assertion_ids)?;
+        let mut evidence_by_assertion: HashMap<String, Vec<Evidence>> = HashMap::new();
+        for ev in all_evidences {
+            let assertion_id = ev.assertion_id.clone();
+            let ev_id = ev.id.clone();
+            evidence_by_assertion
+                .entry(assertion_id.clone())
+                .or_default()
+                .push(ev.clone());
+            evidence_map.insert(
+                ev_id,
+                EvidenceNode {
+                    evidence: ev,
+                    assertion_id,
+                },
+            );
+        }
+
         for assertion in all_assertions {
-            let evidences = repo.get_evidence_for_assertion(&assertion.id)?;
-            for ev in &evidences {
-                evidence_map.insert(
-                    ev.id.clone(),
-                    EvidenceNode {
-                        evidence: ev.clone(),
-                        assertion_id: assertion.id.clone(),
-                    },
-                );
-            }
+            let evidences = evidence_by_assertion
+                .remove(&assertion.id)
+                .unwrap_or_default();
             assertions_map.insert(
                 assertion.id.clone(),
                 AssertionNode {
@@ -87,15 +101,11 @@ impl SemanticSpace {
             );
         }
 
-        // Load assertion relations (depends_on edges)
-        let all_relations = repo.list_assertion_relations()?;
-        for rel in all_relations {
-            // Only keep edges where both endpoints are in our loaded assertions
-            if assertions_map.contains_key(&rel.from_assertion)
-                && assertions_map.contains_key(&rel.to_assertion)
-            {
-                deps.push((rel.from_assertion.clone(), rel.to_assertion.clone()));
-            }
+        // Load assertion relations filtered to loaded assertions (avoids full-table scan)
+        let assertion_ids: Vec<String> = assertions_map.keys().cloned().collect();
+        let filtered_relations = repo.get_assertion_relations_for(&assertion_ids)?;
+        for rel in filtered_relations {
+            deps.push((rel.from_assertion.clone(), rel.to_assertion.clone()));
         }
 
         Ok(Self {
@@ -119,13 +129,24 @@ impl SemanticSpace {
         let mut queue: VecDeque<String> = VecDeque::new();
         queue.push_back(assertion_id.to_string());
 
+        // Build reverse dependency index: (dependency_id) → [dependent_ids]
         let mut reverse_deps: HashMap<&str, Vec<&str>> = HashMap::new();
+        // Build forward dependency index: (dependent_id) → [dependency_ids]
+        let mut forward_deps: HashMap<&str, Vec<&str>> = HashMap::new();
         for (from, to) in &self.depends_on {
             reverse_deps
                 .entry(to.as_str())
                 .or_default()
                 .push(from.as_str());
+            forward_deps
+                .entry(from.as_str())
+                .or_default()
+                .push(to.as_str());
         }
+
+        // Track assertions marked uncertain during simulation — mirrors
+        // apply_cascade's "retracted/uncertain are not independent ground" rule.
+        let mut marked_uncertain: HashSet<String> = HashSet::new();
 
         while let Some(current_id) = queue.pop_front() {
             if !visited.insert(current_id.clone()) {
@@ -141,15 +162,39 @@ impl SemanticSpace {
                         if node.assertion.status == AssertionStatus::Retracted {
                             continue;
                         }
-                        let reason = if current_id == assertion_id {
-                            CascadeReason::MarkedUncertain
-                        } else {
-                            CascadeReason::GroundWeakened
-                        };
+
+                        // Check if this dependent has an independent active
+                        // dependency — same logic as apply_cascade.
+                        let has_independent_active = forward_deps
+                            .get(*dep_id)
+                            .map(|deps| {
+                                deps.iter().any(|d| {
+                                    **d != current_id
+                                        && !marked_uncertain.contains(*d)
+                                        && self
+                                            .assertions
+                                            .get(*d)
+                                            .map(|n| n.assertion.status == AssertionStatus::Active)
+                                            .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false);
+
+                        if has_independent_active {
+                            // Still has ground from another dependency — just weakened.
+                            affected.push(AffectedAssertion {
+                                assertion: node.assertion.clone(),
+                                cascade_reason: CascadeReason::GroundWeakened,
+                            });
+                            continue;
+                        }
+
+                        // No independent ground — mark uncertain and propagate.
                         affected.push(AffectedAssertion {
                             assertion: node.assertion.clone(),
-                            cascade_reason: reason,
+                            cascade_reason: CascadeReason::MarkedUncertain,
                         });
+                        marked_uncertain.insert(dep_id.to_string());
                         queue.push_back(dep_id.to_string());
                     }
                 }
@@ -166,7 +211,12 @@ impl SemanticSpace {
     ///
     /// Considers: fan-in from the structure space, active assertions count,
     /// fragility (invariant/fragility assertions), and downstream dependencies.
-    pub fn assess_risk(&self, entity_id: &str, structure: &StructureSpace) -> RiskAssessment {
+    pub fn assess_risk(
+        &self,
+        entity_id: &str,
+        entity_name: &str,
+        structure: &StructureSpace,
+    ) -> RiskAssessment {
         // Count assertions for this entity
         let entity_assertions: Vec<&AssertionNode> = self
             .assertions
@@ -182,8 +232,10 @@ impl SemanticSpace {
         let fragile_count = entity_assertions
             .iter()
             .filter(|n| {
-                n.assertion.kind.to_string() == "fragility"
-                    || n.assertion.kind.to_string() == "invariant"
+                matches!(
+                    n.assertion.kind,
+                    AssertionKind::Fragility | AssertionKind::Invariant
+                )
             })
             .count();
 
@@ -270,7 +322,7 @@ impl SemanticSpace {
         };
 
         RiskAssessment {
-            entity_name: entity_id.to_string(),
+            entity_name: entity_name.to_string(),
             risk_score,
             downstream_count,
             active_assertions: active_count,

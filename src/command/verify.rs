@@ -252,9 +252,17 @@ fn check_scan_diff(
             })
             .count();
 
-        // Clean stale entities if requested
+        // Clean stale entities if requested — but protect those with assertions
         if clean {
             for name in &stale_names {
+                if let Ok(Some(entity)) = repo.get_entity_by_name(name) {
+                    let assertions = repo
+                        .get_assertions_for_entity(&entity.id)
+                        .unwrap_or_default();
+                    if !assertions.is_empty() {
+                        continue; // protect entities with assertions
+                    }
+                }
                 repo.delete_entity(name)?;
             }
         }

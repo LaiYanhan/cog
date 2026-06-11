@@ -320,11 +320,16 @@ pub fn try_experiment(repo: &dyn Repository, args: &TryArgs<'_>) -> Result<Comma
         depends_on: args.depends_on.clone(),
     };
     experiment.hypothesize(op);
-    let id_short = crate::domain::short_id(&experiment.id);
+    let id_short = crate::domain::short_id(&experiment.id).to_string();
     let mut text = format!(
         "Experiment {id_short}: \"{}\"\n\nHypothesis:\n  + [{}] {}: \"{}\"\n\n",
         experiment.description, args.kind, entity, args.claim,
     );
     text.push_str(&evaluate_and_format(&mut experiment, args.cog_dir)?);
+    let _ = writeln!(text);
+    let _ = writeln!(
+        text,
+        "Next: cog experiment commit {id_short}  # or: cog experiment discard {id_short}"
+    );
     Ok(CommandOutput::success(text))
 }

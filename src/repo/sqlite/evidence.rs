@@ -66,6 +66,51 @@ impl SqliteRepository {
         Ok(evidences)
     }
 
+    /// Load evidences for multiple assertions at once.
+    /// Returns all evidences grouped — caller partitions by assertion_id.
+    pub(super) fn get_evidences_for_assertions(
+        &self,
+        assertion_ids: &[String],
+    ) -> Result<Vec<Evidence>> {
+        if assertion_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Use a temp table to avoid parameter limits.
+        self.conn
+            .execute_batch("CREATE TEMP TABLE IF NOT EXISTS _ev_target_ids(id TEXT PRIMARY KEY); DELETE FROM _ev_target_ids;")
+            .context("failed to prepare temp table")?;
+        {
+            let mut ins = self
+                .conn
+                .prepare("INSERT OR IGNORE INTO _ev_target_ids VALUES (?1)")
+                .context("failed to prepare temp insert")?;
+            for id in assertion_ids {
+                ins.execute(params![id])?;
+            }
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT e.id, e.assertion_id, e.source, e.detail, e.created_at
+                 FROM evidences e
+                 WHERE EXISTS (SELECT 1 FROM _ev_target_ids WHERE id = e.assertion_id)
+                 ORDER BY e.created_at",
+            )
+            .context("failed to prepare get_evidences_for_assertions statement")?;
+        let mut rows = stmt.query([])?;
+        let mut evidences = Vec::new();
+        while let Some(row) = rows.next().context("failed to iterate evidences")? {
+            evidences.push(map_evidence_row(
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            )?);
+        }
+        Ok(evidences)
+    }
+
     pub(super) fn list_evidences(&self) -> Result<Vec<Evidence>> {
         let mut stmt = self
             .conn
