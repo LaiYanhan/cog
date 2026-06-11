@@ -15,12 +15,12 @@ fn action_kind_label(kind: &ActionKind) -> &'static str {
         ActionKind::StartRecording => "model",
         ActionKind::AssessImpact => "assess",
         ActionKind::RecordFix => "model",
-        ActionKind::TraceRootCause => "trace",
         ActionKind::VerifyConsistency => "verify",
         ActionKind::StartExperiment => "descent",
         ActionKind::SyncModel => "drift",
         ActionKind::ImplementNow => "descent",
         ActionKind::CommitExperiment => "descent",
+        ActionKind::RecoverContext => "recover",
     }
 }
 

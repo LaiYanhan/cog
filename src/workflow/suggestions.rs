@@ -26,12 +26,12 @@ pub enum ActionKind {
     StartRecording,
     AssessImpact,
     RecordFix,
-    TraceRootCause,
     VerifyConsistency,
     StartExperiment,
     SyncModel,
     ImplementNow,
     CommitExperiment,
+    RecoverContext,
 }
 
 // ── Public entry point ──────────────────────────────────────────────────────
@@ -149,10 +149,54 @@ fn suggest_post_change() -> Vec<SuggestedAction> {
                 .into(),
     }]
 }
-
-fn suggest_debugging(stats: &ModelStats) -> Vec<SuggestedAction> {
+fn suggest_debugging(stats: &ModelStats, changelog: &[ChangelogEntry]) -> Vec<SuggestedAction> {
     let mut actions = Vec::new();
-    if stats.uncertain_assertions > 0 {
+
+    // ── Correction-based context recovery ─────────────────────────────
+    // Extract entity names from recent correction assertions in the changelog.
+    let mut correction_entities: Vec<String> = Vec::new();
+    for entry in changelog.iter().rev() {
+        if entry.action == ChangelogAction::Assert
+            && entry.detail.contains("kind=correction")
+            && let Some(name) = entry.detail.strip_prefix("entity=")
+        {
+            let name = match name.find(" kind=") {
+                Some(end) => &name[..end],
+                None => name,
+            };
+            if !correction_entities.contains(&name.to_string()) {
+                correction_entities.push(name.to_string());
+            }
+            if correction_entities.len() >= 5 {
+                break;
+            }
+        }
+    }
+
+    if !correction_entities.is_empty() {
+        let sample = correction_entities.join(", ");
+        let first = &correction_entities[0];
+        actions.push(SuggestedAction {
+            action: ActionKind::RecoverContext,
+            description: format!("Recent corrections on: {}", sample),
+            example_command: format!("cog query {}", first),
+        });
+    }
+
+    // ── Retracted assertions ──────────────────────────────────────────
+    if stats.retracted_assertions > 0 {
+        actions.push(SuggestedAction {
+            action: ActionKind::ReviewUncertainAssertions,
+            description: format!(
+                "{} assertion(s) retracted — verify that knowledge is current.",
+                stats.retracted_assertions
+            ),
+            example_command: "cog query <recently_modified_entity>".into(),
+        });
+    }
+
+    // ── Uncertain assertions (cascade fallout) ────────────────────────
+    if stats.uncertain_assertions > 0 && stats.retracted_assertions == 0 {
         actions.push(SuggestedAction {
             action: ActionKind::ReviewUncertainAssertions,
             description: format!(
@@ -162,16 +206,17 @@ fn suggest_debugging(stats: &ModelStats) -> Vec<SuggestedAction> {
             example_command: "cog query <affected_entity>".into(),
         });
     }
-    actions.push(SuggestedAction {
-        action: ActionKind::TraceRootCause,
-        description: "Trace dependency chains to find root causes.".into(),
-        example_command: "cog trace <entity>".into(),
-    });
-    actions.push(SuggestedAction {
-        action: ActionKind::VerifyConsistency,
-        description: "Run verify to check structural consistency.".into(),
-        example_command: "cog verify".into(),
-    });
+
+    // ── Fallback: no model signals to guide recovery ──────────────────
+    if actions.is_empty() {
+        actions.push(SuggestedAction {
+            action: ActionKind::RecoverContext,
+            description: "Read requirements, identify remaining gaps, and continue implementation."
+                .into(),
+            example_command: "cog impact <core_entity>".into(),
+        });
+    }
+
     actions
 }
 
@@ -216,9 +261,9 @@ fn suggest_for_ready(
     // ── Phase-specific suggestions ───────────────────────────────────────
     let phase_actions = match phase {
         WorkflowPhase::FreshScan => suggest_fresh_scan(repo, &stats),
+        WorkflowPhase::Debugging => suggest_debugging(&stats, &changelog),
         WorkflowPhase::Exploring => suggest_exploring(repo, &stats, coverage_pct),
         WorkflowPhase::PostChange => suggest_post_change(),
-        WorkflowPhase::Debugging => suggest_debugging(&stats),
     };
     actions.extend(phase_actions);
 
@@ -351,4 +396,251 @@ fn detect_stagnation(
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::ChangelogAction;
+    use chrono::Utc;
+
+    fn entry(action: ChangelogAction, detail: &str) -> ChangelogEntry {
+        ChangelogEntry {
+            id: "test".into(),
+            action,
+            target_id: "test".into(),
+            detail: detail.into(),
+            timestamp: Utc::now(),
+        }
+    }
+
+    fn empty_stats() -> ModelStats {
+        ModelStats::default()
+    }
+
+    // ── Correction recovery ────────────────────────────────────────────
+
+    #[test]
+    fn debug_with_corrections_extracts_entity_names() {
+        let changelog = vec![
+            entry(
+                ChangelogAction::Assert,
+                "entity=foo::bar kind=correction claim=fix",
+            ),
+            entry(
+                ChangelogAction::Assert,
+                "entity=foo::baz kind=correction claim=fix2",
+            ),
+        ];
+        let actions = suggest_debugging(&empty_stats(), &changelog);
+
+        let recover = actions
+            .iter()
+            .find(|a| matches!(a.action, ActionKind::RecoverContext));
+        assert!(recover.is_some(), "should have a RecoverContext action");
+        let r = recover.unwrap();
+        assert!(
+            r.description.contains("foo::bar"),
+            "should mention first entity"
+        );
+        assert!(
+            r.description.contains("foo::baz"),
+            "should mention second entity"
+        );
+        // Changelog is iterated in reverse, so foo::baz (last entry) is first discovered
+        assert_eq!(r.example_command, "cog query foo::baz");
+    }
+
+    #[test]
+    fn debug_corrections_dedup_entity_names() {
+        let changelog = vec![
+            entry(
+                ChangelogAction::Assert,
+                "entity=alpha kind=correction claim=a",
+            ),
+            entry(
+                ChangelogAction::Assert,
+                "entity=alpha kind=correction claim=b",
+            ),
+        ];
+        let actions = suggest_debugging(&empty_stats(), &changelog);
+
+        let recover = actions
+            .iter()
+            .find(|a| matches!(a.action, ActionKind::RecoverContext))
+            .unwrap();
+        // "alpha" should appear exactly once (deduped), but the join includes it once
+        assert_eq!(recover.description.matches("alpha").count(), 1);
+    }
+
+    #[test]
+    fn debug_corrections_caps_at_five() {
+        let changelog: Vec<ChangelogEntry> = (0..10)
+            .map(|i| {
+                entry(
+                    ChangelogAction::Assert,
+                    &format!("entity=e{i} kind=correction claim=x"),
+                )
+            })
+            .collect();
+        let actions = suggest_debugging(&empty_stats(), &changelog);
+
+        let recover = actions
+            .iter()
+            .find(|a| matches!(a.action, ActionKind::RecoverContext))
+            .unwrap();
+        // The description lists entity names joined by ", "
+        let names_part = recover
+            .description
+            .strip_prefix("Recent corrections on: ")
+            .unwrap();
+        assert_eq!(names_part.split(", ").count(), 5);
+    }
+
+    #[test]
+    fn debug_ignores_non_correction_asserts() {
+        let changelog = vec![
+            entry(ChangelogAction::Assert, "entity=foo kind=contract claim=x"),
+            entry(ChangelogAction::Assert, "entity=bar kind=invariant claim=y"),
+        ];
+        let actions = suggest_debugging(&empty_stats(), &changelog);
+
+        // No corrections, no retractions, no uncertain → fallback only
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a.action, ActionKind::RecoverContext))
+        );
+        assert!(!actions[0].description.contains("foo"));
+    }
+
+    // ── Retraction path ────────────────────────────────────────────────
+
+    #[test]
+    fn debug_with_retracted_shows_review() {
+        let stats = ModelStats {
+            retracted_assertions: 3,
+            ..ModelStats::default()
+        };
+        let actions = suggest_debugging(&stats, &[]);
+
+        let review = actions
+            .iter()
+            .find(|a| matches!(a.action, ActionKind::ReviewUncertainAssertions));
+        assert!(review.is_some(), "should have review action");
+        assert!(review.unwrap().description.contains("3"));
+    }
+
+    #[test]
+    fn debug_retraction_suppresses_uncertain_path() {
+        // When retracted_assertions > 0, the uncertain-only path should NOT fire
+        let stats = ModelStats {
+            retracted_assertions: 1,
+            uncertain_assertions: 5,
+            ..ModelStats::default()
+        };
+        let actions = suggest_debugging(&stats, &[]);
+
+        let review_count = actions
+            .iter()
+            .filter(|a| matches!(a.action, ActionKind::ReviewUncertainAssertions))
+            .count();
+        assert_eq!(
+            review_count, 1,
+            "should have exactly one review (retracted), not two"
+        );
+    }
+
+    // ── Uncertain-only path ────────────────────────────────────────────
+
+    #[test]
+    fn debug_uncertain_only_when_no_retractions() {
+        let stats = ModelStats {
+            uncertain_assertions: 7,
+            ..ModelStats::default()
+        };
+        let actions = suggest_debugging(&stats, &[]);
+
+        let review = actions
+            .iter()
+            .find(|a| matches!(a.action, ActionKind::ReviewUncertainAssertions));
+        assert!(review.is_some());
+        assert!(review.unwrap().description.contains("7"));
+        assert!(review.unwrap().description.contains("uncertain"));
+    }
+
+    // ── Fallback ───────────────────────────────────────────────────────
+
+    #[test]
+    fn debug_fallback_when_no_signals() {
+        let actions = suggest_debugging(&empty_stats(), &[]);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0].action, ActionKind::RecoverContext));
+        assert!(actions[0].description.contains("requirements"));
+    }
+
+    // ── No generic trace/verify ────────────────────────────────────────
+
+    #[test]
+    fn debug_never_suggests_trace_or_verify() {
+        // Test all signal combinations
+        let cases: Vec<(ModelStats, Vec<ChangelogEntry>)> = vec![
+            (empty_stats(), vec![]),
+            (
+                ModelStats {
+                    retracted_assertions: 2,
+                    ..empty_stats()
+                },
+                vec![entry(
+                    ChangelogAction::Assert,
+                    "entity=x kind=correction claim=c",
+                )],
+            ),
+            (
+                ModelStats {
+                    uncertain_assertions: 10,
+                    ..empty_stats()
+                },
+                vec![],
+            ),
+        ];
+
+        for (stats, changelog) in cases {
+            let actions = suggest_debugging(&stats, &changelog);
+            for a in &actions {
+                assert!(
+                    !matches!(a.action, ActionKind::VerifyConsistency),
+                    "debugging should never suggest VerifyConsistency, got {:?}",
+                    a.action
+                );
+            }
+        }
+    }
+
+    // ── Correction + retraction combined ───────────────────────────────
+
+    #[test]
+    fn debug_correction_and_retraction_both_present() {
+        let stats = ModelStats {
+            retracted_assertions: 2,
+            ..ModelStats::default()
+        };
+        let changelog = vec![entry(
+            ChangelogAction::Assert,
+            "entity=core::fn kind=correction claim=fix",
+        )];
+        let actions = suggest_debugging(&stats, &changelog);
+
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a.action, ActionKind::RecoverContext))
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a.action, ActionKind::ReviewUncertainAssertions))
+        );
+        assert!(actions.len() >= 2);
+    }
 }
