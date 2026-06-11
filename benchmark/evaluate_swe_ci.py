@@ -259,7 +259,42 @@ def analyze_trajectories(task_dir: Path) -> dict:
 import re
 
 
-def try_detect_max_epoch(exp_dir: Path) -> int | None:
+META_FILE = "meta.json"
+
+
+def _read_meta(exp_dir: Path) -> dict | None:
+    """Read experiment metadata from meta.json inside the experiment directory."""
+    meta_path = exp_dir / META_FILE
+    if not meta_path.exists():
+        return None
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_meta(exp_dir: Path, meta: dict):
+    """Write experiment metadata to meta.json inside the experiment directory."""
+    meta_path = exp_dir / META_FILE
+    try:
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _detect_max_epoch_from_data(all_iters: dict) -> int | None:
+    """Infer max_epoch from experiment data: the largest epoch count across all tasks.
+
+    At least one task typically runs the full max_epoch iterations without resolving
+    early, so max(n_epochs) is a reliable proxy for the configured max_epoch.
+    """
+    if not all_iters:
+        return None
+    epoch_counts = [it["n_epochs"] for it in all_iters.values() if it.get("n_epochs", 0) > 0]
+    return max(epoch_counts) if epoch_counts else None
+
+
+def _detect_max_epoch_from_config(exp_dir: Path) -> int | None:
     """Try to detect max_epoch from SWE-CI config files matching the experiment name."""
     exp_name = exp_dir.name
 
@@ -358,13 +393,45 @@ def analyze_experiment(exp_dir: Path, max_epoch: int | None = None) -> dict:
         print(f"No task directories found in {exp_dir}", file=sys.stderr)
         sys.exit(1)
 
-    # Auto-detect max_epoch from config if not explicitly specified
+    # Tier 1: explicit CLI arg or meta.json in experiment directory
+    detected_from = "cli"
     if max_epoch is None:
-        max_epoch = try_detect_max_epoch(exp_dir)
+        meta = _read_meta(exp_dir)
+        if meta and "max_epoch" in meta:
+            max_epoch = meta["max_epoch"]
+            detected_from = "meta.json"
 
+    # Phase 1: analyze iterations (needed for heuristic detection)
+    all_iters = {}
+    for task_id, task_dir in tasks:
+        all_iters[task_id] = analyze_iterations(task_dir)
+
+    # Tier 2: heuristic — max epoch count across all tasks
+    if max_epoch is None:
+        max_epoch = _detect_max_epoch_from_data(all_iters)
+        if max_epoch is not None:
+            detected_from = "heuristic"
+
+    # Tier 3: last resort — scan config files by experiment name
+    if max_epoch is None:
+        max_epoch = _detect_max_epoch_from_config(exp_dir)
+        if max_epoch is not None:
+            detected_from = "config"
+
+    # Cache detection result into meta.json for future runs (backward compat
+    # for experiments created before the harness wrote meta.json automatically)
+    if max_epoch is not None and not (exp_dir / META_FILE).exists():
+        _write_meta(exp_dir, {"max_epoch": max_epoch})
+
+    if max_epoch is not None:
+        print(f"  max_epoch={max_epoch} (detected from {detected_from})")
+    else:
+        print(f"  max_epoch: unknown — using per-task epoch count", file=sys.stderr)
+
+    # Phase 2: compute metrics and gather auxiliary data
     results = {}
     for task_id, task_dir in tasks:
-        it = analyze_iterations(task_dir)
+        it = all_iters[task_id]
         cog = analyze_cog(task_dir)
         traj = analyze_trajectories(task_dir)
         metrics = compute_metrics(it, max_epoch=max_epoch)
@@ -897,7 +964,7 @@ def main():
     parser.add_argument("--compare", action="store_true",
                         help="A/B comparison: first dir=baseline, second dir=cog")
     parser.add_argument("--max-epoch", type=int, default=None,
-                        help="Max evolution epochs (auto-detected from config.toml; fallback: actual epoch count)")
+                        help="Override max_epoch (auto-detected: meta.json → max(n_epochs) → config.toml)")
     parser.add_argument("--json", action="store_true", help="Also output JSON report")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show per-task detail")
     args = parser.parse_args()
