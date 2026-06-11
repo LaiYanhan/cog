@@ -27,7 +27,7 @@ pub fn start(
         experiment.entity_focus,
         experiment.structure.entities.len(),
         experiment.semantic.assertions.len(),
-        experiment.boundary_entities.len(),
+        experiment.boundary_count,
     )))
 }
 
@@ -95,7 +95,7 @@ pub fn hypothesize_relation(
 }
 
 /// Generate scout suggestions from an experiment evaluation report.
-/// Sources: contradictions → [verify], blind entities → [assert], boundary entities → [read].
+/// Sources: contradictions → [verify], blind entities → [assert].
 fn generate_scout_suggestions(
     report: &crate::experiment::report::ExperimentReport,
 ) -> Vec<ScoutSuggestion> {
@@ -115,16 +115,6 @@ fn generate_scout_suggestions(
                 entity_kind: "entity".to_string(),
                 reason: "blind (no assertions)".to_string(),
                 action: ScoutAction::Assert,
-            });
-        }
-    }
-    for name in &report.boundary_entities {
-        if !scouts.iter().any(|s| s.entity_name == *name) {
-            scouts.push(ScoutSuggestion {
-                entity_name: name.clone(),
-                entity_kind: "entity".to_string(),
-                reason: "boundary entity (partial data)".to_string(),
-                action: ScoutAction::Read,
             });
         }
     }
@@ -149,11 +139,13 @@ fn evaluate_and_format(experiment: &mut Experiment, cog_dir: &std::path::Path) -
     };
 
     let mut text = format!(
-        "Evaluation:\n  Risk: {risk_label} ({:.2})\n  Contradictions: {}\n  Affected assertions: {}\n  Cascade: {} assertions -> uncertain\n",
+        "Evaluation:\n  Risk: {risk_label} ({:.2})\n  Contradictions: {}\n  Affected assertions: {}\n  Cascade: {} assertions -> uncertain\n  Subgraph: {} loaded, {} at boundary\n",
         report.risk_score,
         report.contradictions.len(),
         report.affected_count,
         report.cascade_count,
+        experiment.structure.entities.len(),
+        report.boundary_count,
     );
 
     if !report.affected_assertions.is_empty() {

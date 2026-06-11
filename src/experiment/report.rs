@@ -15,7 +15,8 @@ pub struct ExperimentReport {
     pub affected_assertions: Vec<crate::domain::AffectedAssertion>,
     /// Subgraph entities that have no active assertions.
     pub blind_entities: Vec<String>,
-    pub boundary_entities: Vec<String>,
+    /// Number of entities on the boundary of the loaded subgraph.
+    pub boundary_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

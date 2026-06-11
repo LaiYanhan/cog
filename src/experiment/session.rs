@@ -44,8 +44,8 @@ pub struct Experiment {
     /// Semantic sub-space snapshot (assertions + evidence).
     #[serde(default)]
     pub semantic: SemanticSpace,
-    /// Entities on the boundary of the loaded subgraph (partial data).
-    pub boundary_entities: Vec<String>,
+    /// Number of entities on the boundary of the loaded subgraph.
+    pub boundary_count: usize,
     // ── Evaluation results (filled after evaluate()) ──
     pub risk_score: Option<f64>,
     pub affected: Vec<AffectedAssertion>,
@@ -70,10 +70,10 @@ impl Experiment {
         let focus = repo.resolve_entity(entity_name)?;
         // Load structural sub-space around the focus (BFS, no depth limit, cap by max_nodes).
         let structure = StructureSpace::load(repo, &focus, 0, max_nodes)?;
+        let boundary_count = structure.boundary_count;
 
         // Load semantic sub-space for the focus entity
         let semantic = SemanticSpace::load(repo, &focus.id)?;
-        let boundary = structure.boundary.clone();
         Ok(Experiment {
             id: Uuid::new_v4().to_string(),
             description,
@@ -84,7 +84,7 @@ impl Experiment {
             ops: Vec::new(),
             structure,
             semantic,
-            boundary_entities: boundary,
+            boundary_count,
             risk_score: None,
             affected: Vec::new(),
             contradictions: Vec::new(),
@@ -197,7 +197,7 @@ impl Experiment {
             contradictions,
             affected_assertions,
             blind_entities,
-            boundary_entities: self.boundary_entities.clone(),
+            boundary_count: self.boundary_count,
         })
     }
 
@@ -359,7 +359,7 @@ mod tests {
             }],
             structure: StructureSpace::default(),
             semantic: SemanticSpace::default(),
-            boundary_entities: vec![],
+            boundary_count: 0,
             risk_score: None,
             affected: vec![],
             contradictions: vec![],
@@ -370,7 +370,11 @@ mod tests {
         let report = exp.commit(&repo)?;
 
         assert_eq!(report.ops_applied, 1, "should apply, not skip");
-        assert_eq!(report.ops_skipped, 0, "expected zero skips, got: {:?}", report.details);
+        assert_eq!(
+            report.ops_skipped, 0,
+            "expected zero skips, got: {:?}",
+            report.details
+        );
 
         // Verify the assertion was actually created on the correct entity
         let entity = repo.resolve_entity("_get_callable_signature")?;
@@ -402,7 +406,7 @@ mod tests {
             }],
             structure: StructureSpace::default(),
             semantic: SemanticSpace::default(),
-            boundary_entities: vec![],
+            boundary_count: 0,
             risk_score: None,
             affected: vec![],
             contradictions: vec![],
@@ -412,7 +416,10 @@ mod tests {
 
         let report = exp.commit(&repo)?;
 
-        assert_eq!(report.ops_applied, 0, "unknown entity should not be applied");
+        assert_eq!(
+            report.ops_applied, 0,
+            "unknown entity should not be applied"
+        );
         assert_eq!(report.ops_skipped, 1);
         assert!(report.details[0].contains("entity not found"));
 

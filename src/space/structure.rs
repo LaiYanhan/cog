@@ -40,8 +40,8 @@ pub struct StructureEdge {
 pub struct StructureSpace {
     pub entities: HashMap<String, EntityNode>,
     pub edges: Vec<StructureEdge>,
-    /// Entities on the boundary of the loaded subgraph (partial data).
-    pub boundary: Vec<String>,
+    /// Number of entities on the boundary of the loaded subgraph (partial data).
+    pub boundary_count: usize,
 }
 
 impl StructureSpace {
@@ -75,7 +75,7 @@ impl StructureSpace {
 
         let mut entities: HashMap<String, Entity> = HashMap::new();
         let mut edges: Vec<StructureEdge> = Vec::new();
-        let mut boundary = Vec::new();
+        let mut boundary_count = 0usize;
 
         // Collect all entity relations once to avoid repeated queries
         let all_relations: Vec<EntityRelation> = repo.list_entity_relations()?;
@@ -117,7 +117,7 @@ impl StructureSpace {
 
                     if visited.len() >= cap {
                         if !visited.contains(neighbor_id) {
-                            boundary.push(neighbor_id.clone());
+                            boundary_count += 1;
                         }
                         continue;
                     }
@@ -139,7 +139,7 @@ impl StructureSpace {
 
                     if visited.len() >= cap {
                         if !visited.contains(neighbor_id) {
-                            boundary.push(neighbor_id.clone());
+                            boundary_count += 1;
                         }
                         continue;
                     }
@@ -175,7 +175,7 @@ impl StructureSpace {
         Ok(Self {
             entities: node_map,
             edges,
-            boundary,
+            boundary_count,
         })
     }
 
