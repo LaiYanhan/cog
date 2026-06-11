@@ -136,6 +136,7 @@ pub struct QueryCard {
     pub entity: Entity,
     pub assertions: Vec<(Assertion, Vec<Evidence>)>,
     pub related: Vec<RelatedEntity>,
+    pub relations_detail: bool,
 }
 
 /// Result of a `cog index` command.
@@ -194,7 +195,6 @@ pub struct ScoutSuggestion {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ScoutAction {
     Assert,
-    Verify,
 }
 
 /// A currently active (Open/Evaluated) experiment detected on disk.

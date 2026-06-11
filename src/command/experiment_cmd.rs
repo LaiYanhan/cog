@@ -95,28 +95,18 @@ pub fn hypothesize_relation(
 }
 
 /// Generate scout suggestions from an experiment evaluation report.
-/// Sources: contradictions → [verify], blind entities → [assert].
+/// Only source: blind entities → [assert].
 fn generate_scout_suggestions(
     report: &crate::experiment::report::ExperimentReport,
 ) -> Vec<ScoutSuggestion> {
     let mut scouts = Vec::new();
-    for c in &report.contradictions {
-        scouts.push(ScoutSuggestion {
-            entity_name: report.entity_focus.clone(),
-            entity_kind: "entity".to_string(),
-            reason: format!("contradiction: {}", c.reason),
-            action: ScoutAction::Verify,
-        });
-    }
     for name in &report.blind_entities {
-        if !scouts.iter().any(|s| s.entity_name == *name) {
-            scouts.push(ScoutSuggestion {
-                entity_name: name.clone(),
-                entity_kind: "entity".to_string(),
-                reason: "blind (no assertions)".to_string(),
-                action: ScoutAction::Assert,
-            });
-        }
+        scouts.push(ScoutSuggestion {
+            entity_name: name.clone(),
+            entity_kind: "entity".to_string(),
+            reason: "blind (no assertions)".to_string(),
+            action: ScoutAction::Assert,
+        });
     }
     scouts
 }
@@ -129,7 +119,6 @@ fn evaluate_and_format(experiment: &mut Experiment, cog_dir: &std::path::Path) -
     experiment.mark_evaluated()?;
     experiment::save(experiment, cog_dir)?;
 
-    let id_short = crate::domain::short_id(&experiment.id);
     let risk_label = if report.risk_score >= 0.8 {
         "HIGH"
     } else if report.risk_score >= 0.5 {
@@ -172,21 +161,6 @@ fn evaluate_and_format(experiment: &mut Experiment, cog_dir: &std::path::Path) -
     let scouts = generate_scout_suggestions(&report);
     let scout_text = crate::format::TextRenderer::render_scouts(&scouts);
     text.push_str(&scout_text);
-
-    let _ = writeln!(text);
-    let _ = writeln!(text, "Next: Discard: cog experiment discard {}", id_short);
-    let _ = writeln!(
-        text,
-        "Next: Adjust hypothesis: cog experiment hypothesize {} ...",
-        id_short
-    );
-    if report.contradictions.is_empty() {
-        let _ = writeln!(
-            text,
-            "Next: Safe to proceed: cog experiment commit {}",
-            id_short
-        );
-    }
 
     Ok(text)
 }
