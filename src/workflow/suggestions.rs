@@ -234,13 +234,16 @@ fn suggest_pending_implement(stats: &ModelStats) -> Vec<SuggestedAction> {
     // The agent must implement the planned changes and then sync.
     actions.push(SuggestedAction {
         action: ActionKind::ImplementPlanned,
-        description: "Model updated with planned changes. Implement the corresponding code changes now.".into(),
+        description:
+            "Model updated with planned changes. Implement the corresponding code changes now."
+                .into(),
         example_command: "# make the code changes, then: cog sync".into(),
     });
 
     actions.push(SuggestedAction {
         action: ActionKind::VerifyConsistency,
-        description: "After implementing, sync to update structural entities and verify consistency.".into(),
+        description:
+            "After implementing, sync to update structural entities and verify consistency.".into(),
         example_command: "cog sync".into(),
     });
 

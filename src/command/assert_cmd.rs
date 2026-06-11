@@ -194,18 +194,19 @@ pub fn execute(repo: &dyn Repository, input: AssertInput<'_>) -> Result<CommandO
     // Density warning: if entity participates in relations and model coverage is low, nudge.
     if let Ok(rel_count) = repo.count_relations_for_entity(&entity.id)
         && rel_count > 0
-            && let Ok(stats) = repo.stats()
-                && stats.entities > 0 {
-                    let coverage = stats.covered_entities as f64 / stats.entities as f64;
-                    if coverage < 0.5 {
-                        let pct = (coverage * 100.0) as u32;
-                        let _ = writeln!(
-                            msg,
-                            "\nWarning: only {pct}% of entities have assertions. Consider: cog impact {}",
-                            input.entity
-                        );
-                    }
-                }
+        && let Ok(stats) = repo.stats()
+        && stats.entities > 0
+    {
+        let coverage = stats.covered_entities as f64 / stats.entities as f64;
+        if coverage < 0.5 {
+            let pct = (coverage * 100.0) as u32;
+            let _ = writeln!(
+                msg,
+                "\nWarning: only {pct}% of entities have assertions. Consider: cog impact {}",
+                input.entity
+            );
+        }
+    }
 
     Ok(CommandOutput::success(format::emit_report(
         &StatusMessage { message: msg },

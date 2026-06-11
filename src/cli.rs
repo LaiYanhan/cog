@@ -14,8 +14,8 @@ pub use experiment::ExperimentAction;
 use crate::backup::BackupManager;
 use crate::command::{self, CommandOutput};
 use crate::repo::SqliteRepository;
-use crate::workflow::state::WorkflowPhase;
 use crate::workflow::WorkflowState;
+use crate::workflow::state::WorkflowPhase;
 #[derive(Debug, Parser)]
 #[command(name = "cog", about = "Cognitive model for coding agents", version)]
 pub struct Cli {

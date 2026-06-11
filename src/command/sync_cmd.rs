@@ -559,13 +559,14 @@ pub fn execute(
     let mut affected_assertions: Vec<(String, Assertion)> = Vec::new();
     for name in &skipped {
         if let Ok(Some(entity)) = repo.get_entity_by_name(name)
-            && let Ok(assertions) = repo.get_assertions_for_entity(&entity.id) {
-                for a in assertions {
-                    if a.status == AssertionStatus::Active {
-                        affected_assertions.push((name.clone(), a));
-                    }
+            && let Ok(assertions) = repo.get_assertions_for_entity(&entity.id)
+        {
+            for a in assertions {
+                if a.status == AssertionStatus::Active {
+                    affected_assertions.push((name.clone(), a));
                 }
             }
+        }
     }
 
     // Changelog
