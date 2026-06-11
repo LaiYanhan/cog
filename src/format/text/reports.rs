@@ -714,19 +714,10 @@ impl TextRenderer {
         }
         let _ = writeln!(out, "\nScout before implementing:");
 
-        // Render read/verify scouts individually (they carry unique info).
+        // Render verify scouts individually (they carry unique contradiction info).
         for s in scouts {
-            if s.action != ScoutAction::Assert {
-                let tag = match s.action {
-                    ScoutAction::Read => "read",
-                    ScoutAction::Verify => "verify",
-                    _ => unreachable!(),
-                };
-                let _ = writeln!(
-                    out,
-                    "  [{}] {} [{}] — {}",
-                    tag, s.entity_name, s.entity_kind, s.reason
-                );
+            if s.action == ScoutAction::Verify {
+                let _ = writeln!(out, "  [verify] {} — {}", s.entity_name, s.reason);
             }
         }
 

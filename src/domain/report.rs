@@ -193,7 +193,6 @@ pub struct ScoutSuggestion {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ScoutAction {
-    Read,
     Assert,
     Verify,
 }
