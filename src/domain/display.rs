@@ -31,9 +31,9 @@ impl AssertedEntity {
 pub fn partition_by_assertion(
     items: impl IntoIterator<Item = (Entity, usize)>,
 ) -> (Vec<AssertedEntity>, Vec<AssertedEntity>) {
-    items
-        .into_iter()
-        .fold((vec![], vec![]), |(mut asserted, mut blind), (entity, count)| {
+    items.into_iter().fold(
+        (vec![], vec![]),
+        |(mut asserted, mut blind), (entity, count)| {
             let ae = AssertedEntity {
                 entity,
                 active_assertions: count,
@@ -44,7 +44,8 @@ pub fn partition_by_assertion(
                 blind.push(ae);
             }
             (asserted, blind)
-        })
+        },
+    )
 }
 
 /// Maximum asserted entities to show per group before folding the rest.

@@ -345,18 +345,14 @@ impl TextRenderer {
         if !result.downstream_entities.is_empty() {
             // Partition into covered (has assertions) and blind (no assertions).
             let (covered, blind) = crate::domain::display::partition_by_assertion(
-                result
-                    .downstream_entities
-                    .iter()
-                    .enumerate()
-                    .map(|(i, e)| {
-                        let count = result
-                            .downstream_assertion_counts
-                            .get(i)
-                            .copied()
-                            .unwrap_or(0);
-                        (e.clone(), count)
-                    }),
+                result.downstream_entities.iter().enumerate().map(|(i, e)| {
+                    let count = result
+                        .downstream_assertion_counts
+                        .get(i)
+                        .copied()
+                        .unwrap_or(0);
+                    (e.clone(), count)
+                }),
             );
 
             // Covered dependents — these have knowledge at stake.
