@@ -9,6 +9,7 @@ impl TextRenderer {
         entity: &Entity,
         assertions: &[(Assertion, Vec<Evidence>)],
         related: &[RelatedEntity],
+        related_assertion_counts: &std::collections::HashMap<String, usize>,
         relations_detail: bool,
     ) -> String {
         let mut out = String::new();
@@ -40,12 +41,11 @@ impl TextRenderer {
                 }
             }
         }
-
         if !related.is_empty() {
             if relations_detail {
                 Self::render_relations_full(&mut out, related);
             } else {
-                Self::render_relations_summary(&mut out, related);
+                Self::render_relations_summary(&mut out, related, related_assertion_counts);
             }
         }
 
@@ -76,27 +76,33 @@ impl TextRenderer {
         }
     }
 
-    fn render_relations_summary(out: &mut String, related: &[RelatedEntity]) {
+    /// Assertion-aware relation summary.
+    ///
+    /// Groups relations by (direction, kind). Within each group, target entities
+    /// with active assertions are expanded (qualified name + kind + count),
+    /// while blind entities are collapsed into a compact one-liner.
+    fn render_relations_summary(
+        out: &mut String,
+        related: &[RelatedEntity],
+        assertion_counts: &std::collections::HashMap<String, usize>,
+    ) {
         use std::collections::HashMap;
 
-        // Group by (direction, kind)
-        let mut groups: HashMap<(RelationDirection, EntityRelationKind), Vec<&str>> =
+        // Group by (direction, kind) — keep full entity refs for rendering.
+        let mut groups: HashMap<(RelationDirection, EntityRelationKind), Vec<&RelatedEntity>> =
             HashMap::new();
         for entry in related {
             groups
                 .entry((entry.direction, entry.kind))
                 .or_default()
-                .push(crate::domain::entity::last_segment(
-                    &entry.entity.qualified_name,
-                ));
+                .push(entry);
         }
 
         let _ = writeln!(out);
         let _ = writeln!(out, "relations ({}):", related.len());
 
-        const MAX_EXAMPLES: usize = 5;
         // Stable output order for the 6 known (direction, kind) combinations.
-        let order = [
+        const ORDER: &[(RelationDirection, EntityRelationKind)] = &[
             (RelationDirection::Outgoing, EntityRelationKind::Calls),
             (RelationDirection::Outgoing, EntityRelationKind::Contains),
             (RelationDirection::Outgoing, EntityRelationKind::Uses),
@@ -106,57 +112,60 @@ impl TextRenderer {
         ];
 
         let mut rendered = std::collections::HashSet::new();
-        for key in &order {
-            if let Some(names) = groups.get(key) {
-                let (dir, kind) = key;
-                let arrow = match dir {
-                    RelationDirection::Outgoing => "→",
-                    RelationDirection::Incoming => "←",
-                };
-                let label = match (dir, kind) {
-                    (RelationDirection::Outgoing, EntityRelationKind::Calls) => "calls".to_string(),
-                    (RelationDirection::Outgoing, EntityRelationKind::Contains) => {
-                        "contains".to_string()
-                    }
-                    (RelationDirection::Incoming, EntityRelationKind::Calls) => {
-                        "called-by".to_string()
-                    }
-                    (RelationDirection::Incoming, EntityRelationKind::Contains) => {
-                        "contained-by".to_string()
-                    }
-                    _ => kind.to_string(),
-                };
-                let extra = if names.len() > MAX_EXAMPLES {
-                    format!(", +{}", names.len() - MAX_EXAMPLES)
-                } else {
-                    String::new()
-                };
-                let examples: Vec<&str> = names.iter().take(MAX_EXAMPLES).copied().collect();
-                let _ = writeln!(
-                    out,
-                    "  {} {} {} ({}{})",
-                    arrow,
-                    label,
-                    names.len(),
-                    examples.join(", "),
-                    extra
-                );
+        for key in ORDER {
+            if let Some(entries) = groups.get(key) {
+                Self::render_relation_group(out, entries, *key, assertion_counts);
                 rendered.insert(key);
             }
         }
         // Catch-all for any combos not in the explicit order (future-proof).
-        for (key, names) in &groups {
+        for (key, entries) in &groups {
             if rendered.contains(&key) {
                 continue;
             }
-            let (dir, kind) = key;
-            let arrow = match dir {
-                RelationDirection::Outgoing => "→",
-                RelationDirection::Incoming => "←",
-            };
-            let examples: Vec<&str> = names.iter().take(MAX_EXAMPLES).copied().collect();
-            let extra = if names.len() > MAX_EXAMPLES {
-                format!(", +{}", names.len() - MAX_EXAMPLES)
+            Self::render_relation_group(out, entries, *key, assertion_counts);
+        }
+    }
+
+    /// Render one (direction, kind) group.
+    ///
+    /// If any target has assertions → multi-line: expand asserted, collapse blind.
+    /// If all blind → compact one-liner (unchanged from old pure-summary).
+    fn render_relation_group(
+        out: &mut String,
+        entries: &[&RelatedEntity],
+        key: (RelationDirection, EntityRelationKind),
+        assertion_counts: &std::collections::HashMap<String, usize>,
+    ) {
+        let (dir, kind) = key;
+        let arrow = match dir {
+            RelationDirection::Outgoing => "→",
+            RelationDirection::Incoming => "←",
+        };
+        let label: String = match (dir, kind) {
+            (RelationDirection::Outgoing, EntityRelationKind::Calls) => "calls".into(),
+            (RelationDirection::Outgoing, EntityRelationKind::Contains) => "contains".into(),
+            (RelationDirection::Incoming, EntityRelationKind::Calls) => "called-by".into(),
+            (RelationDirection::Incoming, EntityRelationKind::Contains) => "contained-by".into(),
+            _ => kind.to_string(),
+        };
+
+        // Partition by assertion count.
+        let (asserted, blind): (Vec<&&RelatedEntity>, Vec<&&RelatedEntity>) = entries
+            .iter()
+            .partition(|e| assertion_counts.get(&e.entity.id).copied().unwrap_or(0) > 0);
+
+        const MAX_EXAMPLES: usize = 5;
+
+        if asserted.is_empty() {
+            // All blind — compact one-liner.
+            let names: Vec<&str> = entries
+                .iter()
+                .take(MAX_EXAMPLES)
+                .map(|e| crate::domain::entity::last_segment(&e.entity.qualified_name))
+                .collect();
+            let extra = if entries.len() > MAX_EXAMPLES {
+                format!(", +{}", entries.len() - MAX_EXAMPLES)
             } else {
                 String::new()
             };
@@ -164,11 +173,31 @@ impl TextRenderer {
                 out,
                 "  {} {} {} ({}{})",
                 arrow,
-                kind,
-                names.len(),
-                examples.join(", "),
+                label,
+                entries.len(),
+                names.join(", "),
                 extra
             );
+        } else {
+            // Has asserted entities — multi-line with assertion counts.
+            // TODO: MAX_ASSERTED should eventually come from user config.
+            let max = crate::domain::display::MAX_ASSERTED;
+            let _ = writeln!(out, "  {} {} {}:", arrow, label, entries.len());
+            for ae in asserted.iter().take(max) {
+                let count = assertion_counts.get(&ae.entity.id).copied().unwrap_or(0);
+                let _ = writeln!(
+                    out,
+                    "    {} [{}]  {} active",
+                    ae.entity.qualified_name, ae.entity.kind, count
+                );
+            }
+            let remaining = asserted.len().saturating_sub(max);
+            if remaining > 0 {
+                let _ = writeln!(out, "    + {} more asserted", remaining);
+            }
+            if !blind.is_empty() {
+                let _ = writeln!(out, "    + {} blind", blind.len());
+            }
         }
     }
 
@@ -315,34 +344,40 @@ impl TextRenderer {
 
         if !result.downstream_entities.is_empty() {
             // Partition into covered (has assertions) and blind (no assertions).
-            let mut covered: Vec<(&Entity, usize)> = Vec::new();
-            let mut blind: Vec<&Entity> = Vec::new();
-            for (i, entity) in result.downstream_entities.iter().enumerate() {
-                let count = result
-                    .downstream_assertion_counts
-                    .get(i)
-                    .copied()
-                    .unwrap_or(0);
-                if count > 0 {
-                    covered.push((entity, count));
-                } else {
-                    blind.push(entity);
-                }
-            }
+            let (covered, blind) = crate::domain::display::partition_by_assertion(
+                result
+                    .downstream_entities
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| {
+                        let count = result
+                            .downstream_assertion_counts
+                            .get(i)
+                            .copied()
+                            .unwrap_or(0);
+                        (e.clone(), count)
+                    }),
+            );
 
-            // Covered dependents — these have knowledge at stake, show all.
+            // Covered dependents — these have knowledge at stake.
             if !covered.is_empty() {
                 let _ = writeln!(out);
                 let _ = writeln!(out, "Covered dependents:");
-                for (entity, count) in &covered {
+                // TODO: MAX_ASSERTED should eventually come from user config.
+                let max = crate::domain::display::MAX_ASSERTED;
+                for ae in covered.iter().take(max) {
                     let _ = writeln!(
                         out,
                         "  {} [{}]    ({} assertion{})",
-                        entity.qualified_name,
-                        entity.kind,
-                        count,
-                        if *count == 1 { "" } else { "s" }
+                        ae.entity.qualified_name,
+                        ae.entity.kind,
+                        ae.active_assertions,
+                        if ae.active_assertions == 1 { "" } else { "s" }
                     );
+                }
+                let remaining = covered.len().saturating_sub(max);
+                if remaining > 0 {
+                    let _ = writeln!(out, "  + {} more covered", remaining);
                 }
             }
 
@@ -353,7 +388,7 @@ impl TextRenderer {
                 let sample_names: Vec<&str> = blind
                     .iter()
                     .take(sample_max)
-                    .map(|e| e.qualified_name.as_str())
+                    .map(|ae| ae.entity.qualified_name.as_str())
                     .collect();
                 if blind.len() <= sample_max {
                     let _ = writeln!(

@@ -136,6 +136,9 @@ pub struct QueryCard {
     pub entity: Entity,
     pub assertions: Vec<(Assertion, Vec<Evidence>)>,
     pub related: Vec<RelatedEntity>,
+    /// Map of (entity_id -> active_assertion_count) for each related target.
+    pub related_assertion_counts: HashMap<String, usize>,
+    /// When true, render full relation details instead of the summary.
     pub relations_detail: bool,
 }
 

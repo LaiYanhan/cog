@@ -1,6 +1,7 @@
 // Domain types — the core data model.
 
 pub mod assertion;
+pub mod display;
 pub mod changelog;
 pub mod entity;
 pub mod evidence;

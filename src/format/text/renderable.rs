@@ -33,6 +33,7 @@ impl Renderable for QueryCard {
             &self.entity,
             &self.assertions,
             &self.related,
+            &self.related_assertion_counts,
             self.relations_detail,
         )
     }

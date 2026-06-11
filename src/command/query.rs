@@ -29,10 +29,25 @@ pub fn execute(
         Ok(CommandOutput::success(text))
     } else {
         let related = repo.get_related_entities(&entity_record.id)?;
+
+        // Build assertion count map for related target entities —
+        // enables the relation summary to distinguish blind vs asserted.
+        let target_ids: Vec<String> = related.iter().map(|r| r.entity.id.clone()).collect();
+        let all_related_assertions = repo.get_assertions_for_entities(&target_ids)?;
+        let related_assertion_counts: std::collections::HashMap<String, usize> =
+            all_related_assertions
+                .iter()
+                .filter(|a| a.status == AssertionStatus::Active)
+                .fold(std::collections::HashMap::new(), |mut acc, a| {
+                    *acc.entry(a.entity_id.clone()).or_insert(0) += 1;
+                    acc
+                });
+
         let card = QueryCard {
             entity: entity_record,
             assertions: assertions_with_evidence,
             related,
+            related_assertion_counts,
             relations_detail: relations,
         };
         Ok(CommandOutput::success(format::emit_report(&card, output)))
