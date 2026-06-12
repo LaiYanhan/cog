@@ -104,11 +104,27 @@ impl WorkflowState {
     }
 
     /// After `sync` — if drift is detected, enter PostChange.
+    /// If in PendingImplement (experiment committed, code now synced), always transition out:
+    ///   drift detected → PostChange (structural changes need review)
+    ///   no drift → Exploring (sync completed, agent may continue modeling)
     pub fn transition_sync(&mut self, drift_detected: bool) {
-        if drift_detected && let WorkflowState::Ready { .. } = self {
-            *self = WorkflowState::Ready {
-                phase: WorkflowPhase::PostChange,
-            };
+        if let WorkflowState::Ready { phase } = self {
+            match phase {
+                WorkflowPhase::PendingImplement => {
+                    *phase = if drift_detected {
+                        WorkflowPhase::PostChange
+                    } else {
+                        WorkflowPhase::Exploring
+                    };
+                }
+                _ => {
+                    if drift_detected {
+                        *self = WorkflowState::Ready {
+                            phase: WorkflowPhase::PostChange,
+                        };
+                    }
+                }
+            }
         }
     }
 
@@ -276,6 +292,34 @@ mod tests {
             state,
             WorkflowState::Ready {
                 phase: WorkflowPhase::PostChange
+            }
+        );
+    }
+
+    #[test]
+    fn sync_from_pending_implement_with_drift() {
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::PendingImplement,
+        };
+        state.transition_sync(true);
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::PostChange
+            }
+        );
+    }
+
+    #[test]
+    fn sync_from_pending_implement_no_drift() {
+        let mut state = WorkflowState::Ready {
+            phase: WorkflowPhase::PendingImplement,
+        };
+        state.transition_sync(false);
+        assert_eq!(
+            state,
+            WorkflowState::Ready {
+                phase: WorkflowPhase::Exploring
             }
         );
     }
