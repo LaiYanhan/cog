@@ -178,6 +178,11 @@ pub struct SyncReport {
     /// Each entry is (entity_name, assertion).
     #[serde(default)]
     pub affected_assertions: Vec<(String, Assertion)>,
+    /// Provisional entities (origin=Experiment) not found in the codebase.
+    /// These were created by experiment commit but the agent hasn't implemented
+    /// the corresponding code yet. Advisory — not auto-deleted.
+    #[serde(default)]
+    pub unresolved_provisional: Vec<String>,
 }
 
 /// Result of a `cog verify` command.
@@ -226,6 +231,9 @@ pub struct NextReport {
     pub coverage_pct: f64,
     pub suggestions: Vec<NextSuggestion>,
     pub stagnation_warning: Option<String>,
+    /// Provisional entities (origin=Experiment) not found in codebase.
+    #[serde(default)]
+    pub unresolved_provisional: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

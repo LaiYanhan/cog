@@ -138,6 +138,7 @@ pub fn execute(
         coverage_pct,
         suggestions,
         stagnation_warning,
+        unresolved_provisional: repo.get_experiment_entity_names().unwrap_or_default(),
     };
 
     Ok(CommandOutput::success(format::emit_report(&report, output)))

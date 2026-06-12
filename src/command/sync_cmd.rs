@@ -432,11 +432,15 @@ fn build_report(
     ctx: &SyncContext,
     removed: &[String],
     skipped: &[String],
+    before_entities: usize,
     after_entities: usize,
     after_assertions: usize,
     affected_assertions: Vec<(String, Assertion)>,
+    unresolved_provisional: Vec<String>,
 ) -> SyncReport {
-    let has_drift = !removed.is_empty() || (!skipped.is_empty());
+    let has_drift = !removed.is_empty()
+        || !skipped.is_empty()
+        || after_entities != before_entities;
 
     let mut entity_counts: HashMap<String, usize> = HashMap::new();
     let module_count =
@@ -470,6 +474,7 @@ fn build_report(
         after_entities,
         after_assertions,
         affected_assertions,
+        unresolved_provisional,
     }
 }
 
@@ -539,9 +544,13 @@ pub fn execute(
             after_entities: 0,
             after_assertions: 0,
             affected_assertions: vec![],
+            unresolved_provisional: vec![],
         };
         return Ok(CommandOutput::success(format::emit_report(&report, output)));
     }
+
+    // Snapshot entity count before upserts to detect new entities
+    let before_entities = repo.list_entities()?.len();
 
     // Build entity hierarchy
     let mut ctx = SyncContext::new();
@@ -584,6 +593,14 @@ pub fn execute(
     // Compute fan_in/fan_out metrics
     compute_fan_metrics(repo)?;
 
+    // Detect unresolved provisional entities: Experiment-origin entities not
+    // found in the codebase (agent committed experiment but didn't implement).
+    let unresolved_provisional: Vec<String> = repo
+        .get_experiment_entity_names()?
+        .into_iter()
+        .filter(|name| !scanned_names.contains(name))
+        .collect();
+
     // Build report
     let after_entities = repo.list_entities()?.len();
     let after_assertions = repo.list_assertions()?.len();
@@ -592,9 +609,11 @@ pub fn execute(
         &ctx,
         &removed,
         &skipped,
+        before_entities,
         after_entities,
         after_assertions,
         affected_assertions,
+        unresolved_provisional,
     );
 
     let mut out = CommandOutput::success(format::emit_report(&report, output));
