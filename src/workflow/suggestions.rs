@@ -380,7 +380,6 @@ fn compute_coverage_pct(stats: &ModelStats) -> f64 {
     (stats.covered_entities as f64) / (stats.entities as f64) * 100.0
 }
 
-
 /// Detect stagnation based on changelog patterns and stale experiments.
 ///
 /// Three rules:

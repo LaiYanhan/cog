@@ -86,17 +86,18 @@ impl Experiment {
             }
         };
 
-        let (structure, boundary_count) = if repo.get_entity_by_name(&focus.qualified_name)?.is_some() {
-            // Existing entity — load subgraph normally
-            let structure = StructureSpace::load(repo, &focus, 0, max_nodes)?;
-            let boundary = structure.boundary_count;
-            (structure, boundary)
-        } else {
-            // Provisional entity — empty subgraph (single node, no relations)
-            let mut structure = StructureSpace::default();
-            structure.add_entity(focus.clone());
-            (structure, 0)
-        };
+        let (structure, boundary_count) =
+            if repo.get_entity_by_name(&focus.qualified_name)?.is_some() {
+                // Existing entity — load subgraph normally
+                let structure = StructureSpace::load(repo, &focus, 0, max_nodes)?;
+                let boundary = structure.boundary_count;
+                (structure, boundary)
+            } else {
+                // Provisional entity — empty subgraph (single node, no relations)
+                let mut structure = StructureSpace::default();
+                structure.add_entity(focus.clone());
+                (structure, 0)
+            };
 
         // Load semantic sub-space for the focus entity (empty for provisional)
         let semantic = SemanticSpace::load(repo, &focus.id)?;

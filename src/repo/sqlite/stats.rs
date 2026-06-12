@@ -65,7 +65,6 @@ impl SqliteRepository {
         })
     }
 
-
     pub(super) fn vacuum_into(&self, target_path: &Path) -> Result<()> {
         let path_str = target_path.to_string_lossy();
         self.conn
