@@ -311,10 +311,21 @@ pub fn try_experiment(repo: &dyn Repository, args: &TryArgs<'_>) -> Result<Comma
         Some(d) => d.clone(),
         None => format!("{}: {}", args.entity, args.claim),
     };
-    let entity_exists = repo.get_entity_by_name(entity)?.is_some();
     let mut experiment = Experiment::start(repo, entity, description, 500)?;
+    // Normalize entity name: use the resolved entity's canonical qualified name
+    // (e.g. copyparty::httpcli::HttpCli::tx_browser instead of the dot-notation input
+    // copyparty.httpcli.HttpCli.tx_browser) so ops target the correct entity on commit.
+    let entity_exists = match repo.get_entity_by_name(&experiment.entity_focus) {
+        Ok(Some(_)) => true,
+        _ => false,
+    };
+    let canonical_name = if entity_exists {
+        experiment.entity_focus.clone()
+    } else {
+        entity.clone()
+    };
     let op = ExperimentOp::Assertion {
-        entity_name: args.entity.clone(),
+        entity_name: canonical_name.clone(),
         kind: args.kind,
         claim: args.claim.clone(),
         grounds: args.grounds.clone(),
@@ -324,7 +335,7 @@ pub fn try_experiment(repo: &dyn Repository, args: &TryArgs<'_>) -> Result<Comma
     let id_short = crate::domain::short_id(&experiment.id).to_string();
     let mut text = format!(
         "Experiment {id_short}: \"{}\"\n\nHypothesis:\n  + [{}] {}: \"{}\"\n\n",
-        experiment.description, args.kind, entity, args.claim,
+        experiment.description, args.kind, canonical_name, args.claim,
     );
     if !entity_exists {
         let _ = writeln!(
