@@ -12,8 +12,19 @@ use anyhow::{Context, Result};
 use clap::Parser;
 
 fn main() -> Result<()> {
-    let cli = cli::Cli::parse();
-
+    let cli = match cli::Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            // Print the original Clap error (includes usage)
+            e.print().ok();
+            // If it's an unknown-argument error, add a concise hint for LLM agents
+            let err_str = e.to_string();
+            if err_str.contains("unexpected argument") || err_str.contains("unexpected subcommand") {
+                eprintln!("\nNote: the flag you used does not exist. Run `cog <command> --help` to see available flags.");
+            }
+            std::process::exit(e.exit_code());
+        }
+    };
     // Determine DB path. Only `sync --init` or explicit `--db` can create a new DB.
     let db_path = if cli.is_sync_init() {
         let path = cli.init_db_path();
