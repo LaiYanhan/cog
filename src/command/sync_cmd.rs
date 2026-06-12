@@ -438,9 +438,7 @@ fn build_report(
     affected_assertions: Vec<(String, Assertion)>,
     unresolved_provisional: Vec<String>,
 ) -> SyncReport {
-    let has_drift = !removed.is_empty()
-        || !skipped.is_empty()
-        || after_entities != before_entities;
+    let has_drift = !removed.is_empty() || !skipped.is_empty() || after_entities != before_entities;
 
     let mut entity_counts: HashMap<String, usize> = HashMap::new();
     let module_count =

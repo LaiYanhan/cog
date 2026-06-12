@@ -270,11 +270,8 @@ impl Experiment {
                         Ok(entity) => entity,
                         Err(_) => {
                             let kind = EntityKind::infer(entity_name);
-                            let entity = repo.upsert_entity(
-                                entity_name,
-                                kind,
-                                EntityOrigin::Experiment,
-                            )?;
+                            let entity =
+                                repo.upsert_entity(entity_name, kind, EntityOrigin::Experiment)?;
                             details.push(format!(
                                 "created provisional entity: {entity_name} [{}]",
                                 kind
@@ -283,13 +280,7 @@ impl Experiment {
                         }
                     };
                     let dep = depends_on.as_deref();
-                    repo.create_assertion(
-                        &entity.id,
-                        *assertion_kind,
-                        claim,
-                        grounds,
-                        dep,
-                    )?;
+                    repo.create_assertion(&entity.id, *assertion_kind, claim, grounds, dep)?;
                     applied += 1;
                     details.push(format!("asserted on {entity_name}: {claim}"));
                 }

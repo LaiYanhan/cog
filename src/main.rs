@@ -19,8 +19,11 @@ fn main() -> Result<()> {
             e.print().ok();
             // If it's an unknown-argument error, add a concise hint for LLM agents
             let err_str = e.to_string();
-            if err_str.contains("unexpected argument") || err_str.contains("unexpected subcommand") {
-                eprintln!("\nNote: the flag you used does not exist. Run `cog <command> --help` to see available flags.");
+            if err_str.contains("unexpected argument") || err_str.contains("unexpected subcommand")
+            {
+                eprintln!(
+                    "\nNote: the flag you used does not exist. Run `cog <command> --help` to see available flags."
+                );
             }
             std::process::exit(e.exit_code());
         }

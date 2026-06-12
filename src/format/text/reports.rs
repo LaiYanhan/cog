@@ -703,16 +703,22 @@ impl TextRenderer {
                 out,
                 "Warning: {} provisional {} created by experiment but not matched by tree-sitter:",
                 report.unresolved_provisional.len(),
-                if report.unresolved_provisional.len() == 1 { "entity" } else { "entities" },
+                if report.unresolved_provisional.len() == 1 {
+                    "entity"
+                } else {
+                    "entities"
+                },
             );
             for name in &report.unresolved_provisional {
                 let _ = writeln!(out, "  - {name}");
             }
-            let _ = writeln!(out,
+            let _ = writeln!(
+                out,
                 "This means either the code hasn't been implemented yet, or the entity name \
                 doesn't match what tree-sitter found (e.g. you used \"fn\" but the scan found \"module::fn\")."
             );
-            let _ = writeln!(out,
+            let _ = writeln!(
+                out,
                 "To fix: implement the code and run `cog sync`, or use the full qualified name \
                 in experiment commands. To discard: `cog delete-entity {}`",
                 report.unresolved_provisional[0]
@@ -812,12 +818,17 @@ impl TextRenderer {
             let _ = writeln!(
                 out,
                 "Unresolved provisional {} (created by experiment, not matched by tree-sitter):",
-                if report.unresolved_provisional.len() == 1 { "entity" } else { "entities" }
+                if report.unresolved_provisional.len() == 1 {
+                    "entity"
+                } else {
+                    "entities"
+                }
             );
             for name in &report.unresolved_provisional {
                 let _ = writeln!(out, "  - {name}");
             }
-            let _ = writeln!(out,
+            let _ = writeln!(
+                out,
                 "Either the code hasn't been implemented, or the entity name doesn't match \
                 (e.g. used \"fn\" but scan found \"module::fn\"). \
                 Run `cog index` to see all entity names, then either implement and sync, \

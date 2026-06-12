@@ -16,8 +16,8 @@ pub use assertion::{Assertion, AssertionKind, AssertionStatus, short_id};
 pub use changelog::{ChangelogAction, ChangelogEntry};
 pub use display::{AssertedEntity, MAX_ASSERTED, partition_by_assertion};
 pub use entity::{Entity, EntityKind, EntityOrigin, parent_qname};
-pub use metrics::EntityMetrics;
 pub use evidence::Evidence;
+pub use metrics::EntityMetrics;
 pub use relations::{
     AssertionRelation, AssertionRelationKind, EntityRelation, EntityRelationKind, RelatedEntity,
     RelationDirection,
