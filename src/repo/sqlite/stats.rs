@@ -65,19 +65,6 @@ impl SqliteRepository {
         })
     }
 
-    /// Count entities that have zero assertions.
-    pub(super) fn count_unasserted_entities(&self) -> Result<u64> {
-        let count: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM entities e WHERE NOT EXISTS \
-             (SELECT 1 FROM assertions a WHERE a.entity_id = e.id)",
-                [],
-                |row| row.get(0),
-            )
-            .context("failed to count unasserted entities")?;
-        Ok(count as u64)
-    }
 
     pub(super) fn vacuum_into(&self, target_path: &Path) -> Result<()> {
         let path_str = target_path.to_string_lossy();

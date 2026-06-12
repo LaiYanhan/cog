@@ -221,9 +221,6 @@ impl Repository for SqliteRepository {
     fn stats(&self) -> Result<ModelStats> {
         self.stats()
     }
-    fn count_unasserted_entities(&self) -> Result<u64> {
-        self.count_unasserted_entities()
-    }
     fn vacuum_into(&self, target_path: &Path) -> Result<()> {
         self.vacuum_into(target_path)
     }

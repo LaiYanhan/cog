@@ -70,7 +70,7 @@ fn experiment_summary(experiments: &[crate::domain::ActiveExperiment]) -> (usize
 
 // ── Phase-specific suggestion functions ──────────────────────────────────────
 
-fn suggest_fresh_scan(repo: &dyn Repository, stats: &ModelStats) -> Vec<SuggestedAction> {
+fn suggest_fresh_scan(_repo: &dyn Repository, stats: &ModelStats) -> Vec<SuggestedAction> {
     let mut actions = Vec::new();
     actions.push(SuggestedAction {
         action: ActionKind::StartRecording,
@@ -80,20 +80,15 @@ fn suggest_fresh_scan(repo: &dyn Repository, stats: &ModelStats) -> Vec<Suggeste
         ),
         example_command: "cog query <core_entity>".into(),
     });
-    let orphans = count_orphan_entities(repo, stats);
-    if orphans > 0 {
-        actions.push(SuggestedAction {
-            action: ActionKind::RecordMissingContracts,
-            description: format!("{orphans} entities have no assertions yet."),
-            example_command: "cog assert <entity> --kind contract --claim \"...\"".into(),
-        });
-    }
+    // Note: we intentionally do NOT suggest "N entities have no assertions" here.
+    // On large codebases (1000+ entities) this suggestion is misleading — the agent
+    // should focus on entities relevant to the current task, not blanket-assert everything.
     actions
 }
 
 fn suggest_exploring(
-    repo: &dyn Repository,
-    stats: &ModelStats,
+    _repo: &dyn Repository,
+    _stats: &ModelStats,
     coverage_pct: f64,
     changelog: &[ChangelogEntry],
 ) -> Vec<SuggestedAction> {
@@ -166,14 +161,8 @@ fn suggest_exploring(
                     .into(),
         });
     } else {
-        let orphans = count_orphan_entities(repo, stats);
-        if orphans > 0 {
-            actions.push(SuggestedAction {
-                action: ActionKind::RecordMissingContracts,
-                description: format!("{orphans} entities have no assertions yet."),
-                example_command: "cog assert <entity> --kind contract --claim \"...\"".into(),
-            });
-        }
+        // Low coverage: don't suggest blanket-asserting entities.
+        // The agent should focus on task-relevant entities, not coverage metrics.
     }
 
     // ── Deepen knowledge on recently worked entities ──────────────────
@@ -391,15 +380,6 @@ fn compute_coverage_pct(stats: &ModelStats) -> f64 {
     (stats.covered_entities as f64) / (stats.entities as f64) * 100.0
 }
 
-/// Count entities with zero assertions.
-fn count_orphan_entities(repo: &dyn Repository, stats: &ModelStats) -> usize {
-    if stats.active_assertions == 0 && stats.retracted_assertions == 0 {
-        // Fast path: no assertions at all → all entities are orphans
-        stats.entities as usize
-    } else {
-        repo.count_unasserted_entities().unwrap_or(0) as usize
-    }
-}
 
 /// Detect stagnation based on changelog patterns and stale experiments.
 ///

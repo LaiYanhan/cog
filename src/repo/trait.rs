@@ -100,6 +100,5 @@ pub trait Repository {
 
     fn count_relations_for_entity(&self, entity_id: &str) -> Result<u64>;
     fn stats(&self) -> Result<ModelStats>;
-    fn count_unasserted_entities(&self) -> Result<u64>;
     fn vacuum_into(&self, target_path: &Path) -> Result<()>;
 }
