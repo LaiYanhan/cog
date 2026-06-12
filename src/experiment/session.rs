@@ -60,20 +60,47 @@ impl Experiment {
     // ── Construction ──────────────────────────────────────────────────────
 
     /// Start a new experiment by loading a subgraph around `entity_name`.
+    /// If the entity doesn't exist in the model yet (e.g. a function about to be created),
+    /// a provisional Experiment-origin entity is used as the focus, with an empty subgraph.
     pub fn start(
         repo: &dyn Repository,
         entity_name: &str,
         description: String,
         max_nodes: usize,
     ) -> Result<Self> {
-        // Resolve the focus entity (exact or fuzzy suffix match).
-        let focus = repo.resolve_entity(entity_name)?;
-        // Load structural sub-space around the focus (BFS, no depth limit, cap by max_nodes).
-        let structure = StructureSpace::load(repo, &focus, 0, max_nodes)?;
-        let boundary_count = structure.boundary_count;
+        // Resolve the focus entity — exact or fuzzy suffix match.
+        // If not found, create a provisional entity for the experiment.
+        let focus = match repo.resolve_entity(entity_name) {
+            Ok(entity) => entity,
+            Err(_) => {
+                // Entity doesn't exist yet — create a provisional one for experiment reasoning.
+                // This will be materialized to the real DB on commit if the agent follows through.
+                Entity {
+                    id: Uuid::new_v4().to_string(),
+                    qualified_name: entity_name.to_string(),
+                    kind: EntityKind::infer(entity_name),
+                    origin: EntityOrigin::Experiment,
+                    metrics: EntityMetrics::empty(),
+                    created_at: Utc::now(),
+                }
+            }
+        };
 
-        // Load semantic sub-space for the focus entity
+        let (structure, boundary_count) = if repo.get_entity_by_name(entity_name)?.is_some() {
+            // Existing entity — load subgraph normally
+            let structure = StructureSpace::load(repo, &focus, 0, max_nodes)?;
+            let boundary = structure.boundary_count;
+            (structure, boundary)
+        } else {
+            // Provisional entity — empty subgraph (single node, no relations)
+            let mut structure = StructureSpace::default();
+            structure.add_entity(focus.clone());
+            (structure, 0)
+        };
+
+        // Load semantic sub-space for the focus entity (empty for provisional)
         let semantic = SemanticSpace::load(repo, &focus.id)?;
+
         Ok(Experiment {
             id: Uuid::new_v4().to_string(),
             description,
@@ -231,26 +258,40 @@ impl Experiment {
             match op {
                 ExperimentOp::Assertion {
                     entity_name,
-                    kind,
+                    kind: assertion_kind,
                     claim,
                     grounds,
                     depends_on,
                 } => {
-                    // Resolve entity name — suffix matching like cog assert uses
-                    match repo.resolve_entity(entity_name) {
-                        Ok(entity) => {
-                            let dep = depends_on.as_deref();
-                            repo.create_assertion(&entity.id, *kind, claim, grounds, dep)?;
-                            applied += 1;
-                            details.push(format!("asserted on {entity_name}: {claim}"));
-                        }
+                    // Resolve entity name — suffix matching like cog assert uses.
+                    // If not found, materialize it (experiment committed on a
+                    // provisional entity created during experiment start).
+                    let entity = match repo.resolve_entity(entity_name) {
+                        Ok(entity) => entity,
                         Err(_) => {
-                            skipped += 1;
+                            let kind = EntityKind::infer(entity_name);
+                            let entity = repo.upsert_entity(
+                                entity_name,
+                                kind,
+                                EntityOrigin::Experiment,
+                            )?;
                             details.push(format!(
-                                "skipped assertion: entity not found: {entity_name}"
+                                "created provisional entity: {entity_name} [{}]",
+                                kind
                             ));
+                            entity
                         }
-                    }
+                    };
+                    let dep = depends_on.as_deref();
+                    repo.create_assertion(
+                        &entity.id,
+                        *assertion_kind,
+                        claim,
+                        grounds,
+                        dep,
+                    )?;
+                    applied += 1;
+                    details.push(format!("asserted on {entity_name}: {claim}"));
                 }
                 ExperimentOp::Retraction {
                     assertion_id,
@@ -389,22 +430,22 @@ mod tests {
         Ok(())
     }
 
-    /// Verify that truly unknown entities still get skipped.
+    /// Verify that commit creates a provisional entity for unknown entities.
     #[test]
-    fn commit_skips_unknown_entity() -> Result<()> {
+    fn commit_creates_provisional_entity() -> Result<()> {
         let repo = SqliteRepository::open_in_memory()?;
 
         let mut exp = Experiment {
-            id: Uuid::new_v4().to_string(),
+            id: "test-commit-entity".into(),
             description: "test".into(),
-            entity_focus: "nonexistent".into(),
+            entity_focus: "no_such_entity".into(),
             entity_focus_id: String::new(),
             created_at: Utc::now(),
             status: ExperimentStatus::Evaluated,
             ops: vec![ExperimentOp::Assertion {
                 entity_name: "no_such_entity".into(),
                 kind: AssertionKind::Contract,
-                claim: "never stored".into(),
+                claim: "provisional entity assertion".into(),
                 grounds: "note:test".into(),
                 depends_on: None,
             }],
@@ -421,11 +462,31 @@ mod tests {
         let report = exp.commit(&repo)?;
 
         assert_eq!(
-            report.ops_applied, 0,
-            "unknown entity should not be applied"
+            report.ops_applied, 1,
+            "assertion should be applied with provisional entity"
         );
-        assert_eq!(report.ops_skipped, 1);
-        assert!(report.details[0].contains("entity not found"));
+        assert_eq!(report.ops_skipped, 0);
+        assert!(
+            report.details[0].contains("created provisional entity"),
+            "should report provisional entity creation: {}",
+            report.details[0]
+        );
+        assert!(
+            report.details[1].contains("asserted on no_such_entity"),
+            "should report assertion: {}",
+            report.details[1]
+        );
+
+        // Verify entity was created in DB with Experiment origin
+        let entity = repo.get_entity_by_name("no_such_entity")?;
+        assert!(entity.is_some(), "provisional entity should exist in DB");
+        let entity = entity.unwrap();
+        assert_eq!(entity.origin, EntityOrigin::Experiment);
+
+        // Verify assertion was created
+        let assertions = repo.get_assertions_for_entity(&entity.id)?;
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].claim, "provisional entity assertion");
 
         Ok(())
     }

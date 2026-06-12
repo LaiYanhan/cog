@@ -74,6 +74,10 @@ pub trait Repository {
 
     fn get_scanned_entity_names(&self) -> Result<Vec<String>>;
 
+    /// Get names of all Experiment-origin entities (provisional entities created
+    /// by experiment commit that haven't been promoted to Scan by sync yet).
+    fn get_experiment_entity_names(&self) -> Result<Vec<String>>;
+
     // ── Changelog ───────────────────────────────────────────────────────────
 
     fn append_changelog(

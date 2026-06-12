@@ -17,6 +17,15 @@ impl SqliteRepository {
         origin: EntityOrigin,
     ) -> Result<Entity> {
         if let Some(entity) = self.get_entity_by_name(qualified_name)? {
+            // Promote Experiment-origin entities to Scan when discovered by tree-sitter
+            if entity.origin == EntityOrigin::Experiment && origin == EntityOrigin::Scan {
+                self.conn
+                    .execute(
+                        "UPDATE entities SET origin = 'scan' WHERE id = ?1",
+                        params![entity.id],
+                    )
+                    .with_context(|| format!("failed to promote entity: {qualified_name}"))?;
+            }
             return Ok(entity);
         }
 
@@ -210,6 +219,31 @@ impl SqliteRepository {
         while let Some(row) = rows
             .next()
             .context("failed to iterate scanned entity names")?
+        {
+            names.push(row.get(0)?);
+        }
+
+        Ok(names)
+    }
+
+    /// Returns the qualified names of all Experiment-origin entities (provisional
+    /// entities created by experiment commit, not yet discovered by tree-sitter).
+    pub(super) fn get_experiment_entity_names(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT qualified_name FROM entities WHERE origin = 'experiment' ORDER BY qualified_name",
+            )
+            .context("failed to prepare get_experiment_entity_names statement")?;
+
+        let mut rows = stmt
+            .query([])
+            .context("failed to query experiment entity names")?;
+
+        let mut names = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .context("failed to iterate experiment entity names")?
         {
             names.push(row.get(0)?);
         }

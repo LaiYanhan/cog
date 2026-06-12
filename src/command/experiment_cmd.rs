@@ -311,6 +311,7 @@ pub fn try_experiment(repo: &dyn Repository, args: &TryArgs<'_>) -> Result<Comma
         Some(d) => d.clone(),
         None => format!("{}: {}", args.entity, args.claim),
     };
+    let entity_exists = repo.get_entity_by_name(entity)?.is_some();
     let mut experiment = Experiment::start(repo, entity, description, 500)?;
     let op = ExperimentOp::Assertion {
         entity_name: args.entity.clone(),
@@ -325,6 +326,14 @@ pub fn try_experiment(repo: &dyn Repository, args: &TryArgs<'_>) -> Result<Comma
         "Experiment {id_short}: \"{}\"\n\nHypothesis:\n  + [{}] {}: \"{}\"\n\n",
         experiment.description, args.kind, entity, args.claim,
     );
+    if !entity_exists {
+        let _ = writeln!(
+            text,
+            "Note: entity \"{entity}\" does not exist in the model yet. \
+             Committing will create it as a provisional entity (origin=experiment). \
+             Run `cog sync` after implementing the code to promote it."
+        );
+    }
     text.push_str(&evaluate_and_format(&mut experiment, args.cog_dir)?);
     let _ = writeln!(text);
     let _ = writeln!(

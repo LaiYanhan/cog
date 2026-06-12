@@ -201,6 +201,9 @@ impl Repository for SqliteRepository {
     fn get_scanned_entity_names(&self) -> Result<Vec<String>> {
         self.get_scanned_entity_names()
     }
+    fn get_experiment_entity_names(&self) -> Result<Vec<String>> {
+        self.get_experiment_entity_names()
+    }
     fn append_changelog(
         &self,
         action: ChangelogAction,

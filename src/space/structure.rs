@@ -43,6 +43,20 @@ pub struct StructureSpace {
     /// Number of entities on the boundary of the loaded subgraph (partial data).
     pub boundary_count: usize,
 }
+impl StructureSpace {
+    /// Add a single entity node (no edges). Used for provisional entities
+    /// in experiments where the entity doesn't exist in the DB yet.
+    pub fn add_entity(&mut self, entity: Entity) {
+        self.entities.insert(
+            entity.id.clone(),
+            EntityNode {
+                entity,
+                dependents: Vec::new(),
+                dependencies: Vec::new(),
+            },
+        );
+    }
+}
 
 impl StructureSpace {
     // ── Loading ──────────────────────────────────────────────────────────

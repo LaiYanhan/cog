@@ -16,6 +16,9 @@ pub enum EntityOrigin {
     #[default]
     Manual,
     Scan,
+    /// Created by experiment commit for a not-yet-scanned entity.
+    /// Promoted to Scan when cog sync discovers the entity in code.
+    Experiment,
 }
 
 impl Display for EntityOrigin {
@@ -23,6 +26,7 @@ impl Display for EntityOrigin {
         f.write_str(match self {
             Self::Manual => "manual",
             Self::Scan => "scan",
+            Self::Experiment => "experiment",
         })
     }
 }
@@ -34,6 +38,7 @@ impl FromStr for EntityOrigin {
         match s {
             "manual" => Ok(Self::Manual),
             "scan" => Ok(Self::Scan),
+            "experiment" => Ok(Self::Experiment),
             _ => Err("invalid entity origin"),
         }
     }
