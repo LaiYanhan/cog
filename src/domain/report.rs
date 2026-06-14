@@ -65,6 +65,23 @@ pub struct VerificationIssue {
     pub detail: String,
 }
 
+impl VerificationIssue {
+    /// Construct an issue scoped to an entity (and optionally an assertion).
+    pub fn new(
+        kind: VerificationIssueKind,
+        entity_name: &str,
+        assertion_id: Option<&str>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            entity_name: Some(entity_name.to_string()),
+            assertion_id: assertion_id.map(str::to_string),
+            detail: detail.into(),
+        }
+    }
+}
+
 /// Complete snapshot of the cognitive model, used for diff/merge operations.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelSnapshot {

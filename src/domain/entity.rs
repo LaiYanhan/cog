@@ -88,28 +88,16 @@ impl FromStr for EntityKind {
     }
 }
 
-// ── Qualified-name helpers ─────────────────────────────────────────────────
-
-/// The last segment of a `::`-separated qualified name, e.g.
-/// `"repo::sqlite::SqliteRepository"` → `"SqliteRepository"`.
-/// Returns the input unchanged if no `::` separator.
-pub fn last_segment(qname: &str) -> &str {
-    qname.rsplit("::").next().unwrap_or(qname)
-}
-
-/// The parent path of a `::`-separated qualified name, e.g.
-/// `"cog::repo::sqlite::SqliteRepository"` → `Some("cog::repo::sqlite")`.
-/// Returns `None` if there is only one segment.
-pub fn parent_qname(qname: &str) -> Option<&str> {
-    qname.rsplit_once("::").map(|(p, _)| p)
-}
+// ---------------------------------------------------------------------------
+// EntityKind
+// ---------------------------------------------------------------------------
 
 impl EntityKind {
     pub fn infer(qualified_name: &str) -> Self {
-        let symbol = last_segment(qualified_name);
+        let symbol = super::naming::last_segment(qualified_name);
         if symbol.chars().next().is_some_and(|c| c.is_uppercase()) {
             EntityKind::Type
-        } else if qualified_name.contains("::") {
+        } else if qualified_name.contains(super::naming::SEP) {
             EntityKind::Function
         } else {
             EntityKind::Module
@@ -175,36 +163,5 @@ mod tests {
     #[test]
     fn infer_bare_lowercase_is_module() {
         assert_eq!(EntityKind::infer("utils"), EntityKind::Module);
-    }
-
-    #[test]
-    fn last_segment_qualified() {
-        assert_eq!(
-            last_segment("cog::repo::sqlite::SqliteRepository"),
-            "SqliteRepository"
-        );
-    }
-
-    #[test]
-    fn last_segment_bare() {
-        assert_eq!(last_segment("foo"), "foo");
-    }
-
-    #[test]
-    fn parent_qname_qualified() {
-        assert_eq!(
-            parent_qname("cog::repo::sqlite::SqliteRepository"),
-            Some("cog::repo::sqlite")
-        );
-    }
-
-    #[test]
-    fn parent_qname_single() {
-        assert_eq!(parent_qname("foo"), None);
-    }
-
-    #[test]
-    fn parent_qname_two_segments() {
-        assert_eq!(parent_qname("a::b"), Some("a"));
     }
 }

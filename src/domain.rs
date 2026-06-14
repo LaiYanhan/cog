@@ -7,6 +7,7 @@ pub mod entity;
 pub mod evidence;
 pub mod grounds;
 pub mod metrics;
+pub mod naming;
 pub mod relations;
 pub mod report;
 pub mod risk;
@@ -14,10 +15,11 @@ pub mod risk;
 // Re-export core types for convenience
 pub use assertion::{Assertion, AssertionKind, AssertionStatus, short_id};
 pub use changelog::{ChangelogAction, ChangelogEntry};
-pub use display::{AssertedEntity, MAX_ASSERTED, partition_by_assertion};
-pub use entity::{Entity, EntityKind, EntityOrigin, parent_qname};
+pub use display::{AssertedEntity, MAX_ASSERTED, entities_word, partition_by_assertion, plural_s};
+pub use entity::{Entity, EntityKind, EntityOrigin};
 pub use evidence::Evidence;
 pub use metrics::EntityMetrics;
+pub use naming::{ancestors, last_segment, normalize, parent_qname, path_to_qualified};
 pub use relations::{
     AssertionRelation, AssertionRelationKind, EntityRelation, EntityRelationKind, RelatedEntity,
     RelationDirection,

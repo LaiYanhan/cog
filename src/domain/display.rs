@@ -53,3 +53,15 @@ pub fn partition_by_assertion(
 /// TODO: this (and the sample caps in the renderers) should eventually
 /// live in a user-facing configuration file rather than being hard-coded.
 pub const MAX_ASSERTED: usize = 15;
+
+// ── Pluralisation helpers ───────────────────────────────────────────────
+
+/// Returns `""` for a single item, `"s"` otherwise.
+pub fn plural_s(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+/// Returns `"entity"` for count 1, `"entities"` otherwise.
+pub fn entities_word(count: usize) -> &'static str {
+    if count == 1 { "entity" } else { "entities" }
+}
