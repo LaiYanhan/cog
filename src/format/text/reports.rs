@@ -1,8 +1,9 @@
 use std::fmt::Write;
 
-use crate::domain::entity::last_segment;
 use crate::domain::*;
-use crate::domain::{AssertedEntity, MAX_ASSERTED, partition_by_assertion};
+use crate::domain::{
+    AssertedEntity, MAX_ASSERTED, entities_word, last_segment, partition_by_assertion, plural_s,
+};
 
 // ---------------------------------------------------------------------------
 // Shared assertion-aware render helpers
@@ -35,6 +36,19 @@ fn render_blind_entities(out: &mut String, blind: &[AssertedEntity], sample_max:
         let remaining = blind.len() - sample_max;
         let _ = write!(out, ", +{}", remaining);
     }
+}
+
+/// Format a language→count map as a descending-count summary string.
+///
+/// E.g. `{"rust": 10, "python": 3}` → `"rust: 10, python: 3"`.
+fn format_lang_summary(files_by_language: &std::collections::HashMap<String, usize>) -> String {
+    let mut entries: Vec<_> = files_by_language.iter().collect();
+    entries.sort_by(|a, b| b.1.cmp(a.1));
+    entries
+        .iter()
+        .map(|(lang, count)| format!("{lang}: {count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 use super::TextRenderer;
@@ -283,7 +297,7 @@ impl TextRenderer {
                 "{} now has {} active assertion{}:",
                 entity_name,
                 active.len(),
-                if active.len() == 1 { "" } else { "s" }
+                plural_s(active.len())
             );
             let mut has_uncertain = false;
             for (assertion, _) in remaining_assertions {
@@ -508,7 +522,7 @@ impl TextRenderer {
             "{} now has {} active assertion{}:",
             entity.qualified_name,
             active.len(),
-            if active.len() == 1 { "" } else { "s" }
+            plural_s(active.len())
         );
         for (i, (a, _)) in active.iter().enumerate() {
             let new_tag = if a.id == assertion.id {
@@ -588,17 +602,9 @@ impl TextRenderer {
 
     pub fn sync_report(report: &SyncReport) -> String {
         let mut out = String::new();
+        let lang_summary = format_lang_summary(&report.files_by_language);
 
         if report.dry_run {
-            let lang_summary = {
-                let mut entries: Vec<_> = report.files_by_language.iter().collect();
-                entries.sort_by(|a, b| b.1.cmp(a.1));
-                entries
-                    .iter()
-                    .map(|(lang, count)| format!("{lang}: {count}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
             let _ = writeln!(out, "DRY RUN — no changes written");
             let _ = writeln!(out);
             let _ = writeln!(
@@ -613,15 +619,6 @@ impl TextRenderer {
         }
 
         // ── Non-dry-run output ─────────────────────────────────────
-        let lang_summary = {
-            let mut entries: Vec<_> = report.files_by_language.iter().collect();
-            entries.sort_by(|a, b| b.1.cmp(a.1));
-            entries
-                .iter()
-                .map(|(lang, count)| format!("{lang}: {count}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
         let _ = writeln!(
             out,
             "Sync: {} files scanned ({})",
@@ -698,16 +695,12 @@ impl TextRenderer {
 
         // Warn about provisional entities not found in code (experiment committed but not implemented)
         if !report.unresolved_provisional.is_empty() {
+            let n = report.unresolved_provisional.len();
             let _ = writeln!(out);
             let _ = writeln!(
                 out,
-                "Warning: {} provisional {} created by experiment but not matched by tree-sitter:",
-                report.unresolved_provisional.len(),
-                if report.unresolved_provisional.len() == 1 {
-                    "entity"
-                } else {
-                    "entities"
-                },
+                "Warning: {n} provisional {} created by experiment but not matched by tree-sitter:",
+                entities_word(n),
             );
             for name in &report.unresolved_provisional {
                 let _ = writeln!(out, "  - {name}");
@@ -814,15 +807,12 @@ impl TextRenderer {
         }
 
         if !report.unresolved_provisional.is_empty() {
+            let n = report.unresolved_provisional.len();
             let _ = writeln!(out);
             let _ = writeln!(
                 out,
                 "Unresolved provisional {} (created by experiment, not matched by tree-sitter):",
-                if report.unresolved_provisional.len() == 1 {
-                    "entity"
-                } else {
-                    "entities"
-                }
+                entities_word(n),
             );
             for name in &report.unresolved_provisional {
                 let _ = writeln!(out, "  - {name}");
