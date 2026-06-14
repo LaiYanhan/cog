@@ -7,6 +7,7 @@ use crate::analysis::{ScanConfig, Scanner};
 use crate::command::CommandOutput;
 use crate::domain::{
     AssertionStatus, ChangelogAction, VerificationIssue, VerificationIssueKind, VerificationReport,
+    entities_word,
 };
 use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
@@ -85,6 +86,8 @@ fn check_entity_structural_issues(
     all_model_names: &HashSet<&str>,
     clean: bool,
 ) -> Result<(Vec<VerificationIssue>, usize)> {
+    use crate::domain::EntityOrigin;
+
     let mut issues = Vec::new();
     let mut cleaned: usize = 0;
 
@@ -102,91 +105,109 @@ fn check_entity_structural_issues(
             .iter()
             .filter(|a| a.status != AssertionStatus::Retracted)
             .count();
+
+        // ── Entity-level checks ──────────────────────────────────────
+
         if non_retracted_count == 0 && relation_count == 0 {
-            issues.push(VerificationIssue {
-                kind: VerificationIssueKind::IsolatedEntity,
-                entity_name: Some(entity.qualified_name.clone()),
-                assertion_id: None,
-                detail: "entity has no assertions and no relations".to_string(),
-            });
+            issues.push(VerificationIssue::new(
+                VerificationIssueKind::IsolatedEntity,
+                &entity.qualified_name,
+                None,
+                "entity has no assertions and no relations",
+            ));
             if clean {
                 repo.delete_entity(&entity.qualified_name)?;
                 cleaned += 1;
             }
         }
 
-        // Detect orphan Manual-origin entities: they have assertions
-        // (so IsolatedEntity doesn't catch them) but no relations.
-        if entity.origin == crate::domain::EntityOrigin::Manual
-            && relation_count == 0
-            && active_count > 0
-        {
-            issues.push(VerificationIssue {
-                kind: VerificationIssueKind::OrphanManualEntity,
-                entity_name: Some(entity.qualified_name.clone()),
-                assertion_id: None,
-                detail: format!(
-                    "Manual entity with {} active assertion(s) but no relations",
-                    active_count
-                ),
-            });
+        // Orphan Manual-origin entity: has assertions but no relations.
+        if entity.origin == EntityOrigin::Manual && relation_count == 0 && active_count > 0 {
+            issues.push(VerificationIssue::new(
+                VerificationIssueKind::OrphanManualEntity,
+                &entity.qualified_name,
+                None,
+                format!("Manual entity with {active_count} active assertion(s) but no relations"),
+            ));
         }
+
+        // ── Assertion-level checks ───────────────────────────────────
+
         for assertion in &assertions {
-            if assertion.status != AssertionStatus::Active {
+            if !assertion.is_active() {
                 continue;
             }
-
-            let evidence = repo.get_evidence_for_assertion(&assertion.id)?;
-            if evidence.is_empty() {
-                issues.push(VerificationIssue {
-                    kind: VerificationIssueKind::MissingEvidence,
-                    entity_name: Some(entity.qualified_name.clone()),
-                    assertion_id: Some(assertion.id.clone()),
-                    detail: "active assertion has no evidence".to_string(),
-                });
-            }
-
-            for ev in &evidence {
-                if ev.source == "code" && !all_model_names.contains(ev.detail.as_str()) {
-                    issues.push(VerificationIssue {
-                        kind: VerificationIssueKind::DanglingGrounds,
-                        entity_name: Some(entity.qualified_name.clone()),
-                        assertion_id: Some(assertion.id.clone()),
-                        detail: format!(
-                            "grounds \"code:{}\" references entity not in model",
-                            ev.detail
-                        ),
-                    });
-                }
-            }
-
-            for dependency in repo.get_dependencies(&assertion.id)? {
-                if dependency.status == AssertionStatus::Retracted {
-                    issues.push(VerificationIssue {
-                        kind: VerificationIssueKind::DependencyOnRetracted,
-                        entity_name: Some(entity.qualified_name.clone()),
-                        assertion_id: Some(assertion.id.clone()),
-                        detail: format!(
-                            "depends on retracted assertion {}",
-                            crate::domain::short_id(&dependency.id)
-                        ),
-                    });
-                } else if dependency.status == AssertionStatus::Uncertain {
-                    issues.push(VerificationIssue {
-                        kind: VerificationIssueKind::DependencyOnUncertain,
-                        entity_name: Some(entity.qualified_name.clone()),
-                        assertion_id: Some(assertion.id.clone()),
-                        detail: format!(
-                            "depends on uncertain assertion {}",
-                            crate::domain::short_id(&dependency.id)
-                        ),
-                    });
-                }
-            }
+            issues.extend(check_assertion_issues(
+                repo,
+                &entity.qualified_name,
+                assertion,
+                all_model_names,
+            )?);
         }
     }
 
     Ok((issues, cleaned))
+}
+
+/// Check a single active assertion for missing evidence, dangling grounds,
+/// and dependency-on-retracted/uncertain.
+fn check_assertion_issues(
+    repo: &dyn Repository,
+    entity_name: &str,
+    assertion: &crate::domain::Assertion,
+    all_model_names: &HashSet<&str>,
+) -> Result<Vec<VerificationIssue>> {
+    let mut issues = Vec::new();
+    let evidence = repo.get_evidence_for_assertion(&assertion.id)?;
+
+    if evidence.is_empty() {
+        issues.push(VerificationIssue::new(
+            VerificationIssueKind::MissingEvidence,
+            entity_name,
+            Some(&assertion.id),
+            "active assertion has no evidence",
+        ));
+    }
+
+    for ev in &evidence {
+        if ev.source == "code" && !all_model_names.contains(ev.detail.as_str()) {
+            issues.push(VerificationIssue::new(
+                VerificationIssueKind::DanglingGrounds,
+                entity_name,
+                Some(&assertion.id),
+                format!(
+                    "grounds \"code:{}\" references entity not in model",
+                    ev.detail
+                ),
+            ));
+        }
+    }
+
+    for dependency in repo.get_dependencies(&assertion.id)? {
+        let kind = match dependency.status {
+            AssertionStatus::Retracted => Some(VerificationIssueKind::DependencyOnRetracted),
+            AssertionStatus::Uncertain => Some(VerificationIssueKind::DependencyOnUncertain),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            let word = match dependency.status {
+                AssertionStatus::Retracted => "retracted",
+                AssertionStatus::Uncertain => "uncertain",
+                _ => unreachable!(),
+            };
+            issues.push(VerificationIssue::new(
+                kind,
+                entity_name,
+                Some(&assertion.id),
+                format!(
+                    "depends on {word} assertion {}",
+                    crate::domain::short_id(&dependency.id)
+                ),
+            ));
+        }
+    }
+
+    Ok(issues)
 }
 
 fn check_scan_diff(
@@ -206,36 +227,9 @@ fn check_scan_diff(
         };
         let scan_result = Scanner::new().scan(&config)?;
 
-        // Build the full set of scanned entity names: definitions + file/directory modules.
-        // This mirrors what sync_cmd creates, so stale detection works for both
-        // function/type entities and structural module entities.
-        let path_to_qualified = crate::command::sync_cmd::path_to_qualified;
-        let mut scanned_names: HashSet<String> = scan_result
-            .definitions
-            .iter()
-            .map(|d| d.qualified_name.clone())
-            .collect();
-        for file_scan in &scan_result.file_scans {
-            let rel = file_scan.path.strip_prefix(path).unwrap_or(&file_scan.path);
-            // File module
-            let file_qname = path_to_qualified(rel);
-            if !file_qname.is_empty() {
-                scanned_names.insert(file_qname.clone());
-            }
-            // Directory modules: split parent path into cumulative :: segments
-            if let Some(parent) = rel.parent() {
-                let parent_qname = path_to_qualified(parent);
-                let mut current = String::new();
-                for segment in parent_qname.split("::") {
-                    if !current.is_empty() {
-                        current.push_str("::");
-                    }
-                    current.push_str(segment);
-                    scanned_names.insert(current.clone());
-                }
-            }
-        }
-
+        // Build the full set of scanned entity names using the shared collector
+        // (same logic as sync_cmd, so stale detection matches what sync creates).
+        let scanned_names = crate::command::sync_cmd::collect_scanned_names(&scan_result, path);
         // Collect qualified names of auto-scanned entities (single query, no N+1)
         let auto_scanned_names = repo.get_scanned_entity_names()?;
 
@@ -258,19 +252,9 @@ fn check_scan_diff(
             })
             .count();
 
-        // Clean stale entities if requested — but protect those with assertions
+        // Clean stale entities if requested — protection logic is shared with sync_cmd.
         if clean {
-            for name in &stale_names {
-                if let Ok(Some(entity)) = repo.get_entity_by_name(name) {
-                    let assertions = repo
-                        .get_assertions_for_entity(&entity.id)
-                        .unwrap_or_default();
-                    if !assertions.is_empty() {
-                        continue; // protect entities with assertions
-                    }
-                }
-                repo.delete_entity(name)?;
-            }
+            crate::command::sync_cmd::delete_stale_protected(repo, &stale_names)?;
         }
     }
 
@@ -309,11 +293,6 @@ fn build_scan_diff_messages(
         ));
     }
     scan_issues
-}
-
-/// Returns "entity" for count 1, "entities" otherwise.
-fn entities_word(count: usize) -> &'static str {
-    if count == 1 { "entity" } else { "entities" }
 }
 
 #[cfg(test)]

@@ -331,9 +331,8 @@ impl SqliteRepository {
     /// Used for fuzzy resolution when exact match fails.
     pub(super) fn find_entities_by_suffix(&self, short_name: &str) -> Result<Vec<Entity>> {
         let pattern = format!("%::{}", short_name);
-        // Normalise Python-style dots to :: so Example.__init__
-        // matches qualified names ending in ::Example::__init__
-        let normalized = short_name.replace('.', "::");
+        // Normalise Python-style dots to :: via the shared naming utility.
+        let normalized = crate::domain::normalize(short_name);
         let norm_pattern = format!("%::{}", normalized);
         let mut stmt = self
             .conn

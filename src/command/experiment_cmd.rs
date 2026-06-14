@@ -315,10 +315,10 @@ pub fn try_experiment(repo: &dyn Repository, args: &TryArgs<'_>) -> Result<Comma
     // Normalize entity name: use the resolved entity's canonical qualified name
     // (e.g. copyparty::httpcli::HttpCli::tx_browser instead of the dot-notation input
     // copyparty.httpcli.HttpCli.tx_browser) so ops target the correct entity on commit.
-    let entity_exists = match repo.get_entity_by_name(&experiment.entity_focus) {
-        Ok(Some(_)) => true,
-        _ => false,
-    };
+    let entity_exists = matches!(
+        repo.get_entity_by_name(&experiment.entity_focus),
+        Ok(Some(_))
+    );
     let canonical_name = if entity_exists {
         experiment.entity_focus.clone()
     } else {

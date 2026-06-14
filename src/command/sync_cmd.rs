@@ -9,31 +9,10 @@ use crate::analysis::{Language, ScanConfig, Scanner};
 use crate::command::CommandOutput;
 use crate::domain::{
     Assertion, AssertionStatus, ChangelogAction, EntityKind, EntityOrigin, EntityRelationKind,
-    SyncReport, parent_qname,
+    SyncReport, ancestors, last_segment, parent_qname, path_to_qualified,
 };
 use crate::format::{self, OutputFormat};
 use crate::repo::Repository;
-
-/// Strips common source-directory prefixes from a relative path, then converts
-/// `a/b/c.rs` → `a::b::c` (without extension).
-pub(crate) fn path_to_qualified(relative: &std::path::Path) -> String {
-    let s = relative.to_string_lossy();
-
-    // Strip common source prefixes: src/, lib/, pkg/
-    let stripped = s
-        .strip_prefix("src/")
-        .or_else(|| s.strip_prefix("lib/"))
-        .or_else(|| s.strip_prefix("pkg/"))
-        .unwrap_or(&s);
-
-    // Remove file extension
-    let without_ext = stripped
-        .rsplit_once('.')
-        .map(|(base, _)| base)
-        .unwrap_or(stripped);
-
-    without_ext.replace('/', "::")
-}
 
 // SyncContext: shared mutable state for the entity-building phases
 
@@ -84,7 +63,7 @@ impl SyncContext {
         file_scans: &[FileScan],
         scan_root: &std::path::Path,
     ) -> Result<()> {
-        // Collect all directory segments using the same prefix-stripping as path_to_qualified.
+        // Collect all directory ancestors using the same prefix-stripping as path_to_qualified.
         let mut all_dirs: Vec<String> = Vec::new();
         for file_scan in file_scans {
             let rel = file_scan
@@ -93,16 +72,9 @@ impl SyncContext {
                 .unwrap_or(&file_scan.path);
             let parent_rel = rel.parent().unwrap_or(std::path::Path::new(""));
             let parent_qname = path_to_qualified(parent_rel);
-            if parent_qname.is_empty() {
-                continue;
-            }
-            let mut current = String::new();
-            for segment in parent_qname.split("::") {
-                if !current.is_empty() {
-                    current.push_str("::");
-                }
-                current.push_str(segment);
-                all_dirs.push(current.clone());
+            all_dirs.extend(ancestors(&parent_qname));
+            if !parent_qname.is_empty() {
+                all_dirs.push(parent_qname);
             }
         }
         all_dirs.sort();
@@ -278,7 +250,7 @@ impl SyncContext {
         // Build simple-name → entity_id index for callee resolution
         let mut name_index: HashMap<&str, &str> = HashMap::new();
         for (qname, id) in &self.def_entity_ids {
-            name_index.insert(crate::domain::entity::last_segment(qname), id);
+            name_index.insert(last_segment(qname), id);
         }
         let mut seen: HashSet<(String, String)> = HashSet::new();
         for file_scan in file_scans {
@@ -323,7 +295,13 @@ fn upsert_and_track(
 }
 /// Build the set of all qualified names that exist in the current scan,
 /// including definitions, files, and directory ancestors.
-fn collect_scanned_names(result: &ScanReport, scan_root: &std::path::Path) -> HashSet<String> {
+///
+/// Shared by `sync_cmd::execute` (drift cleanup) and `verify::check_scan_diff`
+/// (stale/unmodeled detection).
+pub(crate) fn collect_scanned_names(
+    result: &ScanReport,
+    scan_root: &std::path::Path,
+) -> HashSet<String> {
     let mut names: HashSet<String> = result
         .definitions
         .iter()
@@ -355,6 +333,35 @@ fn collect_scanned_names(result: &ScanReport, scan_root: &std::path::Path) -> Ha
     names
 }
 
+/// Delete stale entities, protecting those that have assertions.
+///
+/// Returns `(deleted_names, protected_names)`.  Shared by `sync_cmd`
+/// (drift cleanup) and `verify --scan --clean`.
+pub(crate) fn delete_stale_protected(
+    repo: &dyn Repository,
+    names: &[String],
+) -> Result<(Vec<String>, Vec<String>)> {
+    let mut deleted = Vec::new();
+    let mut protected = Vec::new();
+    for name in names {
+        // Safety check: don't auto-delete entities with assertions.
+        // The agent may have recorded knowledge claims against them.
+        let has_assertions = match repo.get_entity_by_name(name) {
+            Ok(Some(entity)) => !repo
+                .get_assertions_for_entity(&entity.id)
+                .unwrap_or_default()
+                .is_empty(),
+            _ => false,
+        };
+        if has_assertions {
+            protected.push(name.clone());
+        } else if repo.delete_entity(name)? {
+            deleted.push(name.clone());
+        }
+    }
+    Ok((deleted, protected))
+}
+
 /// Remove Scan-origin entities no longer present in the codebase.
 ///
 /// Returns `(removed, skipped)` where `skipped` are stale entities that
@@ -363,35 +370,14 @@ fn remove_stale_entities(
     repo: &dyn Repository,
     scanned_names: &HashSet<String>,
 ) -> Result<(Vec<String>, Vec<String>)> {
-    let auto_scanned_names = repo.get_scanned_entity_names()?;
-
-    let mut stale_names: Vec<String> = auto_scanned_names
+    let mut stale_names: Vec<String> = repo
+        .get_scanned_entity_names()?
         .iter()
         .filter(|name| !scanned_names.contains(*name))
         .cloned()
         .collect();
     stale_names.sort();
-
-    let mut removed: Vec<String> = Vec::new();
-    let mut skipped: Vec<String> = Vec::new();
-    for name in &stale_names {
-        // Safety check: don't auto-delete entities with assertions.
-        // The agent may have recorded knowledge claims against them.
-        if let Ok(Some(entity)) = repo.get_entity_by_name(name) {
-            let assertions = repo
-                .get_assertions_for_entity(&entity.id)
-                .unwrap_or_default();
-            if !assertions.is_empty() {
-                skipped.push(name.clone());
-                continue;
-            }
-        }
-        if repo.delete_entity(name)? {
-            removed.push(name.clone());
-        }
-    }
-
-    Ok((removed, skipped))
+    delete_stale_protected(repo, &stale_names)
 }
 
 /// Compute fan_in/fan_out metrics for all entities and persist them.
@@ -426,19 +412,26 @@ fn compute_fan_metrics(repo: &dyn Repository) -> Result<()> {
     Ok(())
 }
 
+/// Results of post-sync drift detection — produced by the drift-cleanup phase
+/// and consumed together by [`build_report`].
+struct DriftResult {
+    removed: Vec<String>,
+    skipped: Vec<String>,
+    affected_assertions: Vec<(String, Assertion)>,
+    unresolved_provisional: Vec<String>,
+}
+
 /// Assemble the final `SyncReport` from phase results.
 fn build_report(
     result: &ScanReport,
     ctx: &SyncContext,
-    removed: &[String],
-    skipped: &[String],
+    drift: &DriftResult,
     before_entities: usize,
     after_entities: usize,
     after_assertions: usize,
-    affected_assertions: Vec<(String, Assertion)>,
-    unresolved_provisional: Vec<String>,
 ) -> SyncReport {
-    let has_drift = !removed.is_empty() || !skipped.is_empty() || after_entities != before_entities;
+    let has_drift =
+        !drift.removed.is_empty() || !drift.skipped.is_empty() || after_entities != before_entities;
 
     let mut entity_counts: HashMap<String, usize> = HashMap::new();
     let module_count =
@@ -462,17 +455,17 @@ fn build_report(
         files_scanned: result.files_scanned,
         files_by_language: result.files_by_language.clone(),
         entities_created: ctx.entities_created(),
-        entities_removed: removed.len(),
+        entities_removed: drift.removed.len(),
         relations_created: ctx.relations_created(),
         entity_counts_by_kind: entity_counts,
-        stale_entities: removed.to_vec(),
-        stale_skipped: skipped.to_vec(),
+        stale_entities: drift.removed.clone(),
+        stale_skipped: drift.skipped.clone(),
         dry_run: false,
         has_drift,
         after_entities,
         after_assertions,
-        affected_assertions,
-        unresolved_provisional,
+        affected_assertions: drift.affected_assertions.clone(),
+        unresolved_provisional: drift.unresolved_provisional.clone(),
     }
 }
 
@@ -549,8 +542,7 @@ pub fn execute(
 
     // Snapshot entity count before upserts to detect new entities
     let before_entities = repo.list_entities()?.len();
-
-    // Build entity hierarchy
+    // Create entities and structural relations
     let mut ctx = SyncContext::new();
     ctx.create_dir_entities(repo, &result.file_scans, &scan_root)?;
     ctx.create_file_entities(repo, &result.file_scans, &scan_root)?;
@@ -599,19 +591,23 @@ pub fn execute(
         .filter(|name| !scanned_names.contains(name))
         .collect();
 
+    let drift = DriftResult {
+        removed,
+        skipped,
+        affected_assertions,
+        unresolved_provisional,
+    };
+
     // Build report
     let after_entities = repo.list_entities()?.len();
     let after_assertions = repo.list_assertions()?.len();
     let report = build_report(
         &result,
         &ctx,
-        &removed,
-        &skipped,
+        &drift,
         before_entities,
         after_entities,
         after_assertions,
-        affected_assertions,
-        unresolved_provisional,
     );
 
     let mut out = CommandOutput::success(format::emit_report(&report, output));
