@@ -11,15 +11,17 @@ Experiments test "what if" scenarios on lightweight in-memory snapshots
 
 | Command | Purpose |
 |---------|---------|
-| `cog experiment try <entity> --kind <k> --claim "<t>" --grounds "<s>" [--desc "<d>"]` | Quick one-liner: start + hypothesize + evaluate |
-| `cog experiment start <entity> --desc "<desc>"` | Start experiment on an entity's dependency subgraph |
-| `cog experiment hypothesize <id> --assert ...` | Inject hypothetical assertion |
-| `cog experiment hypothesize <id> --delete <entity>` | Inject hypothetical entity deletion |
-| `cog experiment evaluate <id>` | Evaluate impact of all staged operations. Returns risk, contradictions, scout suggestions. |
+| `cog experiment try <entity> --kind <k> --claim "<t>" --grounds "<s>" [--desc "<d>"] [--depends-on <id>]` | Quick one-liner: start + hypothesize + evaluate |
+| `cog experiment start <entity> [--description "<desc>"] [--max-nodes <n>]` | Start experiment on an entity's dependency subgraph (default 500 nodes) |
+| `cog experiment hypothesize <id> --entity <entity> --kind <k> --claim "<t>" --grounds "<s>"` | Inject a hypothetical assertion |
+| `cog experiment hypothetical-relation --id <id> --from <a> --to <b> --kind contains\|calls\|uses` | Inject a hypothetical entity relation |
+| `cog experiment hypothetical-delete --id <id> --entity <entity>` | Inject a hypothetical entity deletion |
+| `cog experiment evaluate <id>` | Evaluate impact of all staged operations. Returns risk, contradictions, blind entities. |
 | `cog experiment report <id>` | Show full experiment report |
 | `cog experiment commit <id>` | Replay staged operations to real model |
 | `cog experiment discard <id>` | Discard experiment |
-| `cog experiment list` | List all experiments |
+| `cog experiment list` | List all experiments (drafts vs saved) |
+| `cog experiment save <id>` / `cog experiment load <id>` | Save as checkpoint / load a saved experiment |
 
 ### Quick Workflow (covers 80% of scenarios)
 
@@ -43,10 +45,10 @@ cog experiment discard <id>
 
 ```bash
 # 1. Start an experiment around a focal entity
-cog experiment start auth::login --desc "what if login takes 3 params?"
+cog experiment start auth::login --description "what if login takes 3 params?"
 
 # 2. Inject hypothetical operations
-cog experiment hypothesize <id> --assert auth::login \
+cog experiment hypothesize <id> --entity auth::login \
     --kind contract --claim "now accepts (user, pass, rate_limit)" \
     --grounds "hypothesis:rate-limit-feature"
 
@@ -58,7 +60,7 @@ cog experiment evaluate <id>
 # → Scout before implementing: [read] api::login_handler — verify current signature
 
 # 4. After scouting, re-evaluate if needed (supports Phase 3/4 loop)
-cog experiment hypothesize <id> --delete some_entity   # adjust plan
+cog experiment hypothetical-delete --id <id> --entity some_entity   # adjust plan
 cog experiment evaluate <id>                           # re-evaluate
 
 # 5. Commit (replay to real model) or discard
@@ -69,10 +71,10 @@ cog experiment discard <id>
 ### Commit Semantics
 
 Commit is deterministic replay of staged operations:
-- `HypotheticalAssertion` → `create_assertion` on real DB
-- `HypotheticalRetraction` → `retract` + TMS cascade on real DB
-- `HypotheticalRelation` → `add_entity_relation` on real DB
-- `HypotheticalDeleteEntity` → `delete_entity` on real DB
+- `Assertion` → `create_assertion` on real DB
+- `Retraction` → `retract` + TMS cascade on real DB
+- `Relation` → `add_entity_relation` on real DB
+- `Delete` → `delete_entity` on real DB
 
 No diff-merge, no UUID conflict resolution. The experiment records operations
 (intent), not state diffs — replay is deterministic.

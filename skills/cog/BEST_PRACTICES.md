@@ -53,7 +53,7 @@ changelog. Review the reported counts before confirming.
 | `fragility` | A known risk or trap for future maintainers | "Depends on undocumented header format from v2 API" |
 | `correction` | A mistake was made and fixed — don't repeat it | "Off-by-one in bounds check fixed in abc1234" |
 
-**Do NOT use** `structure` or `behavior` — they are not valid kinds.
+**Do NOT use** `structure`, `behavior`, or `safety` — they are not valid kinds.
 
 ## Entity Relation Kinds
 

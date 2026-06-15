@@ -1,6 +1,6 @@
 ---
 name: cog
-description: "Cognitive model CLI for LLM coding agents. Use when the agent needs to record, query, or reason about codebase knowledge: contracts, invariants, dependencies, fragility points. Activated by: cog assert/retract/query/impact/trace/depend/verify/export/stats/index/delete-entity/sync/experiment/backup commands."
+description: "Cognitive model CLI for LLM coding agents. Use when the agent needs to record, query, or reason about codebase knowledge: contracts, invariants, dependencies, fragility points. Activated by: cog assert/retract/query/impact/trace/depend/verify/export/stats/index/delete-entity/sync/experiment/backup/recover/next commands."
 ---
 
 # cog — Cognitive Model for Coding Agents
@@ -80,14 +80,17 @@ accepting IDs resolve short IDs automatically.
 | Command | Purpose |
 |---------|---------|
 | `cog experiment try <entity> --kind <k> --claim "<t>" --grounds "<s>" [--desc "<d>"] [--depends-on <id>]` | Quick one-liner: start + hypothesize + evaluate. Covers 80% of scenarios. |
-| `cog experiment start <entity> --desc "<desc>"` | Start hypothesis experiment on in-memory snapshot |
-| `cog experiment hypothesize <id> --assert ...` | Inject hypothetical assertion |
-| `cog experiment hypothesize <id> --delete <entity>` | Inject hypothetical entity deletion |
-| `cog experiment evaluate <id>` | Evaluate impact of staged operations — returns risk, contradictions, scout suggestions |
+| `cog experiment start <entity> [--description "<desc>"] [--max-nodes <n>]` | Start hypothesis experiment on in-memory snapshot (default 500 nodes) |
+| `cog experiment hypothesize <id> --entity <entity> --kind <k> --claim "<t>" --grounds "<s>"` | Inject a hypothetical assertion |
+| `cog experiment hypothetical-relation --id <id> --from <a> --to <b> --kind contains\|calls\|uses` | Inject a hypothetical entity relation |
+| `cog experiment hypothetical-delete --id <id> --entity <entity>` | Inject a hypothetical entity deletion |
+| `cog experiment evaluate <id>` | Evaluate impact of staged operations — returns risk, contradictions, blind entities |
 | `cog experiment report <id>` | Show full experiment report |
 | `cog experiment commit <id>` | Replay staged operations to real model |
 | `cog experiment discard <id>` | Discard experiment |
-| `cog experiment list` | List all experiments |
+| `cog experiment list` | List all experiments (drafts vs saved) |
+| `cog experiment save <id>` | Mark experiment as a saved checkpoint |
+| `cog experiment load <id>` | Load a saved experiment |
 | `cog backup create --name <name>` | Full DB snapshot (VACUUM INTO) |
 | `cog backup list` | List all backups |
 | `cog backup restore <name>` | Restore backup as active model |
@@ -103,7 +106,7 @@ accepting IDs resolve short IDs automatically.
 | `fragility` | What could break and why | "Depends on undocumented header format from v2 API" |
 | `correction` | What was wrong and how it was fixed | "Off-by-one in bounds check fixed in abc1234" |
 
-**Do NOT use** `structure` or `behavior` — they are not valid kinds.
+**Do NOT use** `structure`, `behavior`, or `safety` — they are not valid kinds.
 
 ## Entity Relation Kinds
 
