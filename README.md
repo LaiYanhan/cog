@@ -93,6 +93,9 @@ cog verify --scan --scan-path src/     # scan a specific directory
 cog verify
 cog verify --scope <entity>            # scope to a subtree
 cog verify --clean                     # also delete isolated entities
+# Recover assertions that went uncertain after a retraction cascade
+cog recover                  # preview which uncertain assertions can be restored
+cog recover --apply          # restore them to active
 
 # Model statistics
 cog stats
@@ -133,8 +136,8 @@ cog experiment try <entity> --kind correction \
     --desc "what if we change X?" [--depends-on <id>]
 
 # Or step-by-step for complex scenarios:
-cog experiment start auth::login --desc "what if login takes 3 params?"
-cog experiment hypothesize <id> --assert auth::login \
+cog experiment start auth::login --description "what if login takes 3 params?"
+cog experiment hypothesize <id> --entity auth::login \
     --kind contract --claim "now accepts (user, pass, rate_limit)" \
     --grounds "hypothesis:rate-limit-feature"
 cog experiment evaluate <id>
@@ -153,14 +156,16 @@ Experiment commands:
 | Command | Description |
 |---|---|
 | `cog experiment try <entity> --kind ...` | Start + hypothesize + evaluate in one step |
-| `cog experiment start <entity> --desc "<desc>"` | Start hypothesis experiment |
-| `cog experiment hypothesize <id> --assert ...` | Inject hypothetical assertion |
-| `cog experiment hypothesize <id> --delete <entity>` | Inject hypothetical entity deletion |
+| `cog experiment start <entity> [--description "<desc>"]` | Start hypothesis experiment |
+| `cog experiment hypothesize <id> --entity <entity> --kind ...` | Inject hypothetical assertion |
+| `cog experiment hypothetical-relation --id <id> --from <a> --to <b> --kind ...` | Inject hypothetical entity relation |
+| `cog experiment hypothetical-delete --id <id> --entity <entity>` | Inject hypothetical entity deletion |
 | `cog experiment evaluate <id>` | Evaluate impact of staged operations |
 | `cog experiment report <id>` | Show full experiment report |
 | `cog experiment commit <id>` | Replay staged ops to real model |
 | `cog experiment discard <id>` | Discard experiment |
 | `cog experiment list` | List all experiments |
+| `cog experiment save <id>` / `cog experiment load <id>` | Save as checkpoint / load saved |
 
 
 ### Backup workflow (full model snapshots)
