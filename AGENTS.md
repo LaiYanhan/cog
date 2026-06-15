@@ -21,7 +21,7 @@ main.rs → cli::Cli::parse() → command::<module>::execute(&dyn Repository) �
 
 ### Six-Layer Architecture
 
-Cog is organized into six layers, bottom-up: **code space** (the source code being modeled), **persistence** (`Repository` trait, `SqliteRepository` impl), **analysis+modeling** (tree-sitter scanning + domain types), **cognitive latent space** (graph algorithms: cascade, impact, trace), **workflow guide** (state machine + suggestion engine), and **experiment** (hypothesis evaluation). See `docs/RUST_ARCHITECTURE_REDESIGN.md` §2 for the full layered diagram and design rationale.
+Cog is organized into six layers, bottom-up: **code space** (the source code being modeled), **persistence** (`Repository` trait, `SqliteRepository` impl), **analysis+modeling** (tree-sitter scanning + domain types), **cognitive latent space** (graph algorithms: cascade, impact, trace), **workflow guide** (state machine + suggestion engine), and **experiment** (hypothesis evaluation). See `docs/architecture/01-overview.md` for the full layered diagram and design rationale.
 
 ### Data Flow (per command)
 
