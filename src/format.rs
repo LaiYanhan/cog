@@ -1,4 +1,3 @@
-pub mod json;
 pub mod text;
 
 pub use text::TextRenderer;
@@ -19,6 +18,7 @@ pub trait Renderable {
 pub fn emit_report<T: serde::Serialize + Renderable>(report: &T, format: OutputFormat) -> String {
     match format {
         OutputFormat::Text => report.render_text(),
-        OutputFormat::Json => json::JsonRender::render(report),
+        OutputFormat::Json => serde_json::to_string_pretty(report)
+            .unwrap_or_else(|e| format!("{{\"error\": \"json serialization failed: {e}\"}}")),
     }
 }

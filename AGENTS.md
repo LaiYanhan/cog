@@ -35,7 +35,7 @@ Cog is organized into six layers, bottom-up: **code space** (the source code bei
 - **No async** — everything is synchronous. The tree-sitter parsing and SQLite operations are fast enough.
 - **anyhow::Result** everywhere — no custom error types. Preconditions use `bail!()` / `anyhow!()`.
 - **Repository trait** decouples commands from storage — single `SqliteRepository` impl, tests use `open_in_memory()` for real SQL semantics without disk I/O
-- **Output formatting** centralized in `format/` module — `Renderable` trait routes reports to `TextRenderer` (human-readable) or `JsonRender` (machine-readable) via `--output` flag
+- **Output formatting** centralized in `format/` module — `Renderable` trait routes reports to `TextRenderer` (human-readable) or `serde_json` (machine-readable) via `--output` flag
 - **Workflow state machine** guides agent via `cog next` — serialized to `.cog/workflow_state.json`; tracks Uninit → Ready → Changing transitions
 - **Short IDs** — UUIDs displayed as first 8 chars; resolved automatically across all commands.
 
@@ -167,7 +167,6 @@ Every command module exports exactly one public `execute()` function. Most accep
 | `src/workflow/state.rs` | WorkflowState machine + transitions |
 | `src/workflow/suggestions.rs` | Suggestion engine for cog next |
 | `src/format/text.rs` | TextRenderer — human-readable output |
-| `src/format/json.rs` | JsonRender — machine-readable JSON output |
 | `src/command/verify.rs` | Structural consistency checks |
 | `src/command/sync_cmd.rs` | Tree-sitter scanning orchestration (sync) |
 | `src/domain/metrics.rs` | EntityMetrics — fan_in, fan_out, line_count, visibility |

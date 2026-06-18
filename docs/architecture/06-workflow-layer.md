@@ -46,7 +46,7 @@ pub enum WorkflowPhase {
 | `retract` | `transition_retract` | 任何 `Ready` → `Debugging` |
 | `verify`（通过） | `transition_verify(true)` | `Debugging` → `Exploring` |
 | `verify`（未通过） | `transition_verify(false)` | 保持 `Debugging` |
-| `index`/`stats`/`export` | `transition_browse` | 无变化（浏览不改状态） |
+| `index`/`stats`/`export` | —（无转换） | 无变化（浏览不改状态） |
 | `experiment commit` | cli 直接设 | `Ready` → `PendingImplement` |
 | `recover --apply` | `transition_explore` | → `Exploring` |
 

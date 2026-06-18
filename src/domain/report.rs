@@ -218,12 +218,6 @@ pub struct ScoutSuggestion {
     pub entity_name: String,
     pub entity_kind: String,
     pub reason: String,
-    pub action: ScoutAction,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ScoutAction {
-    Assert,
 }
 
 /// A currently active (Open/Evaluated) experiment detected on disk.

@@ -100,7 +100,7 @@
 
 ### ADR-09 Renderable 而非 Display
 
-**选择**：`Serialize` + `Renderable` trait + 独立 `TextRenderer`/`JsonRender`。**理由**：`Display` 锁死单一输出格式。`Renderable` 使加 `--output json` 是加法，不改动所有命令。
+**选择**：`Serialize` + `Renderable` trait + `TextRenderer`（文本）。**理由**：`Display` 锁死单一输出格式。`Renderable` 使加 `--output json`（`serde_json` 内联于 `emit_report`）是加法，不改动所有命令。
 
 ### ADR-10 anyhow 错误处理
 

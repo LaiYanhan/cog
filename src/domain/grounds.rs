@@ -32,18 +32,6 @@ impl Grounds {
     }
 }
 
-impl std::fmt::Display for Grounds {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.source, self.detail)
-    }
-}
-
-impl From<&str> for Grounds {
-    fn from(s: &str) -> Self {
-        Self::parse(s)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,11 +82,5 @@ mod tests {
     fn validate_format_ok() {
         let g = Grounds::parse("code:x");
         assert!(g.validate_format().is_ok());
-    }
-
-    #[test]
-    fn display_roundtrip() {
-        let g = Grounds::parse("code:auth::login");
-        assert_eq!(format!("{}", g), "code:auth::login");
     }
 }

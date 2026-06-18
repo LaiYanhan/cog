@@ -887,13 +887,11 @@ impl TextRenderer {
         let _ = writeln!(out, "\nScout before implementing:");
 
         // Blind entities: count only — individual names are not actionable.
-        let blind: Vec<&ScoutSuggestion> = scouts
-            .iter()
-            .filter(|s| s.action == ScoutAction::Assert)
-            .collect();
-        if !blind.is_empty() {
-            let _ = writeln!(out, "  [assert] {} blind entities in subgraph", blind.len());
-        }
+        let _ = writeln!(
+            out,
+            "  [assert] {} blind entities in subgraph",
+            scouts.len()
+        );
 
         out
     }

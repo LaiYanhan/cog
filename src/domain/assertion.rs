@@ -21,14 +21,6 @@ pub fn short_id(id: &str) -> &str {
     if id.len() >= 8 { &id[..8] } else { id }
 }
 impl Assertion {
-    pub fn short_id(&self) -> &str {
-        if self.id.len() >= 8 {
-            &self.id[..8]
-        } else {
-            &self.id
-        }
-    }
-
     pub fn is_active(&self) -> bool {
         self.status == AssertionStatus::Active
     }

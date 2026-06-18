@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         path
     } else if let Some(db) = cli.find_existing_db() {
         db
-    } else if let Some(path) = cli.explicit_db() {
+    } else if let Some(path) = cli.db.as_ref() {
         // Explicit --db but file doesn't exist yet — allow creation (e.g. CI pipelines)
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)

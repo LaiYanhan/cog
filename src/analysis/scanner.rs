@@ -46,7 +46,7 @@ impl Scanner {
             .keys()
             .filter_map(|name| name.parse().ok())
             .collect();
-        langs.sort_by_key(|l: &Language| l.to_string());
+        langs.sort_by_key(|l: &Language| l.as_str());
         result.languages_detected = langs;
 
         // Build Entity objects from definitions.

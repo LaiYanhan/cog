@@ -8,10 +8,9 @@
 src/format/
 ├── (format.rs)    # OutputFormat enum + Renderable trait + emit_report()
 ├── text.rs        # 模块声明，re-export text 子模块
-├── text/
-│   ├── renderable.rs  # 各报告类型的 Renderable 实现
-│   └── reports.rs     # TextRenderer 方法（人类可读渲染）
-└── json.rs        # JsonRender：serde JSON 序列化
+└── text/
+    ├── renderable.rs  # 各报告类型的 Renderable 实现
+    └── reports.rs     # TextRenderer 方法（人类可读渲染）
 ```
 
 ## 核心抽象
@@ -29,7 +28,7 @@ pub fn emit_report<T: serde::Serialize + Renderable>(report: &T, format: OutputF
 每个命令构建领域报告类型（定义在 `domain/report.rs`），同时 derive `Serialize` + 实现 `Renderable`，再 `emit_report(&report, self.output)` 路由：
 
 - `Text` → `report.render_text()`（`TextRenderer`）
-- `Json` → `json::JsonRender::render(report)`（serde_json）
+- `Json` → `serde_json::to_string_pretty(report)`（内联于 `emit_report`）
 
 ## CommandOutput
 
@@ -53,10 +52,10 @@ pub struct CommandOutput {
 
 ## JSON 输出
 
-`json::JsonRender::render(report)` 直接 `serde_json::to_string`。由于报告类型 derive `Serialize` 且字段用 `#[serde(skip_serializing_if)]` 等控制，JSON 输出忠实反映结构。`--output json` 是全局 flag。
+`emit_report` 的 JSON 分支直接调用 `serde_json::to_string_pretty`。由于报告类型 derive `Serialize` 且字段用 `#[serde(skip_serializing_if)]` 等控制，JSON 输出忠实反映结构。`--output json` 是全局 flag。
 
 ## 设计约束
 
 - **格式与领域逻辑解耦**：命令只构建报告类型，不拼字符串。这是与早期"工具类 Formatter"反模式的区别——加 `--output json` 是加法，不改动命令。
-- 不用 `Display` trait——它会锁死单一输出格式。`Renderable` + 独立 `TextRenderer`/`JsonRender` 让多输出格式可扩展。
+- 不用 `Display` trait——它会锁死单一输出格式。`Renderable` + `TextRenderer`（文本）+ `serde_json`（JSON 内联于 `emit_report`）让多输出格式可扩展。
 - `has_drift` 这类"带外信号"通过结构体字段传递，不通过文本解析。

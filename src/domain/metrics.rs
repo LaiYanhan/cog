@@ -1,4 +1,3 @@
-use clap::ValueEnum;
 use std::fmt::{self, Display, Formatter};
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +17,7 @@ pub struct EntityMetrics {
     pub visibility: Visibility,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, ValueEnum)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     #[default]
@@ -42,11 +41,5 @@ impl Display for Visibility {
             Visibility::Private => write!(f, "private"),
             Visibility::Restricted => write!(f, "restricted"),
         }
-    }
-}
-impl EntityMetrics {
-    /// A zero-metrics instance used for manually created entities.
-    pub fn empty() -> Self {
-        Self::default()
     }
 }

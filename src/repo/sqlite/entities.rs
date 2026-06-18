@@ -34,7 +34,7 @@ impl SqliteRepository {
             qualified_name: qualified_name.to_string(),
             kind,
             origin,
-            metrics: EntityMetrics::empty(),
+            metrics: EntityMetrics::default(),
             created_at: Utc::now(),
         };
 

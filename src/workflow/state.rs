@@ -128,10 +128,7 @@ impl WorkflowState {
         }
     }
 
-    /// After `index`, `stats`, `export` — browsing, no phase change.
-    pub fn transition_browse(&mut self) {
-        // no-op: browsing doesn't change state
-    }
+    // ── `index`/`stats`/`export`/`delete-entity` are pure reads — no transition. ──
 
     /// Human-readable description of current state.
     pub fn describe(&self) -> String {

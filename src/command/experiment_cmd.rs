@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::fmt::Write;
 
 use crate::command::CommandOutput;
-use crate::domain::{AssertionKind, ScoutAction, ScoutSuggestion};
+use crate::domain::{AssertionKind, ScoutSuggestion};
 use crate::experiment::{self, Experiment, ExperimentOp};
 use crate::repo::Repository;
 
@@ -105,7 +105,6 @@ fn generate_scout_suggestions(
             entity_name: name.clone(),
             entity_kind: "entity".to_string(),
             reason: "blind (no assertions)".to_string(),
-            action: ScoutAction::Assert,
         });
     }
     scouts

@@ -27,7 +27,7 @@ pub use relations::{
 pub use report::{
     ActiveExperiment, AffectedAssertion, CascadeReason, CascadeReport, EntityIndex, ExportFormat,
     ImpactCard, IndexCoverage, ModelSnapshot, ModelStats, ModuleCoverage, NextModelSummary,
-    NextReport, NextSuggestion, QueryCard, ScoutAction, ScoutSuggestion, StatusMessage, SyncReport,
+    NextReport, NextSuggestion, QueryCard, ScoutSuggestion, StatusMessage, SyncReport,
     TopUncovered, TraceAssertion, TraceTree, VerificationIssue, VerificationIssueKind,
     VerificationReport,
 };

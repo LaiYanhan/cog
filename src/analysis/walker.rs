@@ -47,7 +47,7 @@ pub fn walk_and_scan(
         let scan = scan_file(path, lang, &config.root, pool)?;
         *result
             .files_by_language
-            .entry(lang.to_string().to_owned())
+            .entry(lang.as_str().to_owned())
             .or_insert(0) += 1;
         result.files_scanned += 1;
         result.definitions.extend(scan.definitions.clone());

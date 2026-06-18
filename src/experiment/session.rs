@@ -80,7 +80,7 @@ impl Experiment {
                     qualified_name: entity_name.to_string(),
                     kind: EntityKind::infer(entity_name),
                     origin: EntityOrigin::Experiment,
-                    metrics: EntityMetrics::empty(),
+                    metrics: EntityMetrics::default(),
                     created_at: Utc::now(),
                 }
             }
@@ -164,7 +164,7 @@ impl Experiment {
                                 existing_claim: a.claim.clone(),
                                 reason: format!(
                                     "same entity and kind, different claim (existing: {})",
-                                    a.short_id()
+                                    short_id(&a.id)
                                 ),
                             });
                         }

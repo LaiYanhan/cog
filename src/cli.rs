@@ -21,7 +21,7 @@ use crate::workflow::state::WorkflowPhase;
 pub struct Cli {
     /// Path to the cognitive model database
     #[arg(long, env = "COG_DB")]
-    db: Option<PathBuf>,
+    pub db: Option<PathBuf>,
 
     /// Output format: text (default) or json
     #[arg(long, global = true, default_value = "text")]
@@ -123,11 +123,6 @@ impl Cli {
         matches!(&self.command, Commands::Sync(args) if args.init)
     }
 
-    /// Returns the explicit `--db` path if one was provided.
-    pub fn explicit_db(&self) -> Option<&PathBuf> {
-        self.db.as_ref()
-    }
-
     pub fn run(&self, store: &SqliteRepository) -> Result<CommandOutput> {
         let cog_dir = self
             .db_path()
@@ -153,12 +148,10 @@ impl Cli {
             }
             Commands::Impact(args) => {
                 let out = command::impact::execute(store, &args.entity, self.output)?;
-                wf.transition_browse();
                 Ok(out)
             }
             Commands::Trace(args) => {
                 let out = command::trace::execute(store, &args.entity, self.output)?;
-                wf.transition_browse();
                 Ok(out)
             }
             Commands::Index(args) => {
@@ -171,7 +164,6 @@ impl Cli {
                     args.uncovered,
                     self.output,
                 )?;
-                wf.transition_browse();
                 Ok(out)
             }
             Commands::Assert(args) => {
@@ -230,19 +222,16 @@ impl Cli {
             }
             Commands::Export(args) => {
                 let out = command::export::execute(store, args.format)?;
-                wf.transition_browse();
                 Ok(out)
             }
             Commands::Stats(_) => {
                 let out = command::stats::execute(store, self.output)?;
-                wf.transition_browse();
                 Ok(out)
             }
             Commands::DeleteEntity(args) => {
                 let out = command::entity_cmd::execute(store, &args.entity)?;
                 // delete-entity doesn't change phase (design §5.1) — next `cog next`
                 // may suggest verify due to the destructive operation.
-                wf.transition_browse();
                 Ok(out)
             }
             Commands::Experiment { action } => {
