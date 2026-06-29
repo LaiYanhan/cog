@@ -130,11 +130,21 @@ impl WorkflowState {
 
     // ── `index`/`stats`/`export`/`delete-entity` are pure reads — no transition. ──
 
-    /// Human-readable description of current state.
-    pub fn describe(&self) -> String {
+    /// Machine-readable status: "uninitialized" or "ready".
+    pub fn status_label(&self) -> &'static str {
         match self {
-            WorkflowState::Uninit => "uninitialized".into(),
-            WorkflowState::Ready { phase } => format!("ready ({})", phase_label(phase)),
+            WorkflowState::Uninit => "uninitialized",
+            WorkflowState::Ready { .. } => "ready",
+        }
+    }
+
+    /// Machine-readable phase label for Ready states ("exploring", "post_change", …);
+    /// `None` when uninitialized. Lets JSON consumers read status and phase as
+    /// separate fields instead of parsing the combined "ready (exploring)" string.
+    pub fn phase_label_opt(&self) -> Option<&'static str> {
+        match self {
+            WorkflowState::Ready { phase } => Some(phase_label(phase)),
+            WorkflowState::Uninit => None,
         }
     }
 }
@@ -336,16 +346,18 @@ mod tests {
     }
 
     #[test]
-    fn describe_uninit() {
+    fn status_and_phase_uninit() {
         let state = WorkflowState::Uninit;
-        assert_eq!(state.describe(), "uninitialized");
+        assert_eq!(state.status_label(), "uninitialized");
+        assert_eq!(state.phase_label_opt(), None);
     }
 
     #[test]
-    fn describe_ready_exploring() {
+    fn status_and_phase_ready_exploring() {
         let state = WorkflowState::Ready {
             phase: WorkflowPhase::Exploring,
         };
-        assert_eq!(state.describe(), "ready (exploring)");
+        assert_eq!(state.status_label(), "ready");
+        assert_eq!(state.phase_label_opt(), Some("exploring"));
     }
 }

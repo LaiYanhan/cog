@@ -235,7 +235,10 @@ pub struct ActiveExperiment {
 /// Result of a `cog next` command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NextReport {
-    pub state: String,
+    pub status: String,
+    /// Current workflow phase label, when status is "ready" (else null).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
     pub active_experiments: Vec<ActiveExperiment>,
     pub model: NextModelSummary,
     pub covered: u64,
@@ -253,6 +256,7 @@ pub struct NextModelSummary {
     pub assertions: u64,
     pub active: u64,
     pub retracted: u64,
+    pub uncertain: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

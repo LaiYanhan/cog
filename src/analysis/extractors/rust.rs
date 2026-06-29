@@ -114,7 +114,11 @@ fn extract_rust_impl(
 ) {
     let impl_name = impl_node
         .child_by_field_name("type")
-        .map(|n| node_text(&n, source));
+        .map(|n| node_text(&n, source))
+        // Strip generic parameters: `Lexer<'a>` -> `Lexer`, `HashMap<K,V>` -> `HashMap`.
+        // The bare type name always precedes the first `<`, so splitting there is exact
+        // and keeps method qnames stable across lifetime/generic changes.
+        .map(|n| n.split('<').next().unwrap_or(&n).trim().to_string());
 
     // Methods are inside declaration_list, not direct children of impl_item
     let mut cursor = impl_node.walk();

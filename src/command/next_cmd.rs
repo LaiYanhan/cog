@@ -126,12 +126,14 @@ pub fn execute(
     };
 
     let report = NextReport {
-        state: wf.describe(),
+        status: wf.status_label().to_string(),
+        phase: wf.phase_label_opt().map(String::from),
         active_experiments,
         model: NextModelSummary {
             entities: stats.entities,
             assertions: stats.assertions,
             active: stats.active_assertions,
+            uncertain: stats.uncertain_assertions,
             retracted: stats.retracted_assertions,
         },
         covered: stats.covered_entities,

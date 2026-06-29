@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::domain::*;
 use crate::domain::{
-    AssertedEntity, MAX_ASSERTED, entities_word, last_segment, partition_by_assertion, plural_s,
+    AssertedEntity, MAX_ASSERTED, entities_word, partition_by_assertion, plural_s,
 };
 
 // ---------------------------------------------------------------------------
@@ -26,15 +26,25 @@ fn render_asserted_entities(out: &mut String, asserted: &[AssertedEntity], inden
 }
 /// Collapse blind entities: write comma-separated short names (up to `sample_max`),
 fn render_blind_entities(out: &mut String, blind: &[AssertedEntity], sample_max: usize) {
-    let names: Vec<&str> = blind
+    let names: Vec<String> = blind
         .iter()
         .take(sample_max)
-        .map(|ae| last_segment(&ae.entity.qualified_name))
+        .map(|ae| disambig_name(&ae.entity.qualified_name))
         .collect();
     let _ = write!(out, "{}", names.join(", "));
     if blind.len() > sample_max {
-        let remaining = blind.len() - sample_max;
-        let _ = write!(out, ", +{}", remaining);
+        let _ = write!(out, ", +{}", blind.len() - sample_max);
+    }
+}
+
+/// Last two `::`-separated segments of a qualified name — disambiguates methods
+/// (which `eval`?) without the verbosity of the full path.
+fn disambig_name(qname: &str) -> String {
+    let segs: Vec<&str> = qname.split("::").collect();
+    match segs.len() {
+        0 => String::new(),
+        1 | 2 => qname.to_string(),
+        _ => segs[segs.len() - 2..].join("::"),
     }
 }
 
@@ -86,7 +96,12 @@ impl TextRenderer {
                     assertion.claim
                 );
                 if let Some(ev) = evidences.first() {
-                    let _ = writeln!(out, "    grounds: {}", ev.source);
+                    let grounds = if ev.detail.is_empty() {
+                        ev.source.clone()
+                    } else {
+                        format!("{}:{}", ev.source, ev.detail)
+                    };
+                    let _ = writeln!(out, "    grounds: {}", grounds);
                 }
             }
         }
@@ -764,7 +779,11 @@ impl TextRenderer {
 
     pub fn next_report(report: &NextReport) -> String {
         let mut out = String::new();
-        let _ = writeln!(out, "State: {}", report.state);
+        let state_line = match &report.phase {
+            Some(phase) => format!("{} ({})", report.status, phase),
+            None => report.status.clone(),
+        };
+        let _ = writeln!(out, "State: {}", state_line);
 
         if report.active_experiments.is_empty() {
             let _ = writeln!(out, "Experiment: none");
@@ -780,10 +799,11 @@ impl TextRenderer {
 
         let _ = writeln!(
             out,
-            "Model: {} entities, {} assertions ({} active, {} retracted)",
+            "Model: {} entities, {} assertions ({} active, {} uncertain, {} retracted)",
             report.model.entities,
             report.model.assertions,
             report.model.active,
+            report.model.uncertain,
             report.model.retracted
         );
         let _ = writeln!(
@@ -886,12 +906,19 @@ impl TextRenderer {
         }
         let _ = writeln!(out, "\nScout before implementing:");
 
-        // Blind entities: count only — individual names are not actionable.
+        // Count, then surface the top blind spots by name so the agent knows where
+        // the gaps are (capped — full list is noise in low-coverage subgraphs).
         let _ = writeln!(
             out,
             "  [assert] {} blind entities in subgraph",
             scouts.len()
         );
+        for s in scouts.iter().take(5) {
+            let _ = writeln!(out, "    - {} [{}]", s.entity_name, s.entity_kind);
+        }
+        if scouts.len() > 5 {
+            let _ = writeln!(out, "    ... +{} more", scouts.len() - 5);
+        }
 
         out
     }
