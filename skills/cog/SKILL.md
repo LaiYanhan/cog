@@ -14,9 +14,7 @@ those claims, and reason about impact when things change.
 ## Core Concepts
 
 **Entity** — a qualified name for a code construct:
-`module::function`, `crate::module::Type`. Kinds are inferred:
-`Module` (contains `::` but not `::camelCase`), `Function` (`::camelCase` ending),
-`Type` (`::PascalCase` ending). Created automatically by `sync` or implicitly by `assert`.
+`module::function`, `crate::module::Type`. Kinds are inferred from the qualified name: a name whose **last segment starts uppercase** → `Type`; otherwise, if it contains `::` → `Function`; otherwise → `Module`. Created automatically by `sync` or implicitly by `assert`. (Caveat: a qualified lowercase module path like `crate::ast` is therefore classified `Function` by inference — scan-origin modules get the correct `Module` kind from the tree-sitter extractor; only manual entities rely on the name heuristic.)
 
 **Assertion** — a knowledge claim about an entity. Each has a `kind`
 (contract / intent / invariant / fragility / correction), a `claim`
@@ -61,6 +59,7 @@ accepting IDs resolve short IDs automatically.
 | `cog depend <entity_a> --on <entity_b> --kind contains\|calls\|uses` | Link two entities structurally. Returns the entity's full relation set. |
 | `cog retract <id> --reason "<why>"` | Retract a claim. Cascades to dependents. Returns entity's remaining assertions with status marks. |
 | `cog delete-entity <qualified_name>` | Delete entity + all assertions, evidence, relations, changelog. Irreversible. |
+| `cog migrate <from_entity> <to_entity>` | Move all assertions + relations from `from` onto `to`, then delete `from`. Reconciles design-phase (Manual) entities with the real (Scan) entities sync later produces — keeps design assertions from becoming orphans. |
 
 ### Reading
 

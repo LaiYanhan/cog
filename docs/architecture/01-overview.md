@@ -115,4 +115,4 @@ cli.rs → Cli::run(&store)
        → output.emit()
 ```
 
-例外：`sync` 非空跑时包裹在 `store.transaction()` 中以保证原子性；`experiment commit` 后将 phase 设为 `PendingImplement`。
+例外：`sync` 不再包裹在 `store.transaction()` 中——`delete_entity` 已自行管理事务，外层事务会导致嵌套 `BEGIN` 并在清理 stale entity 时崩溃；sync 幂等且可重跑，已足以容忍非原子执行。`experiment commit` 后将 phase 设为 `PendingImplement`。

@@ -51,7 +51,7 @@ Cog is organized into six layers, bottom-up: **code space** (the source code bei
 | `src/analysis.rs` + `src/analysis/` | Tree-sitter scanning: Scanner, ParserPool, FileWalker, language extractors |
 | `src/experiment.rs` + `src/experiment/` | Hypothesis experiment: session, ops, report, persistence |
 | `src/backup.rs` + `src/backup/` | Full model backup: BackupManager (create/list/restore/drop) |
-| `tests/` | Integration + unit tests (24 total) |
+| `tests/` | Integration + unit tests |
 | `benchmark/` | Harbor Terminus-2 benchmark harness for A/B evaluation |
 | `skills/cog/` | Skill documentation for agent runtime |
 ## Development Commands
@@ -65,7 +65,7 @@ cargo build                     # debug build
 cargo test                      # runs tests (subprocess-based)
 
 # Run
-cargo run -- init .             # scan current dir
+cargo run -- sync --init .      # create .cog/ and scan current dir
 cargo run -- assert my::fn --kind contract --claim "does X" --grounds "code:my::fn"
 cargo run -- query my::fn
 cargo run -- next                # workflow suggestion
@@ -135,10 +135,10 @@ Every command module exports exactly one public `execute()` function. Most accep
 ### Testing
 
 - **No test framework** beyond `#[test]`. No rstest, test-case, or mocks.
-- Three integration tests: happy path workflow, retraction cascade verification. Plus unit tests in command/ and repo/ modules.
+- Integration tests (subprocess via real binary): full CRUD workflow, retraction cascade, experiment boundary/scout, debugging suggestions, empty-dir bootstrap, stale-entity removal, entity migration. Plus unit tests in command/ and repo/ modules.
 - Unit tests in command/repo modules use `SqliteRepository::open_in_memory()`.
 - Helper: `cog_bin()` reads `CARGO_BIN_EXE_cog` env var (set by `cargo test`).
-- Pattern: `let output = run_ok(&["init", "."], &db_path)` → assert stdout contains expected text.
+- Pattern: `let output = run_ok(&["sync", "--init"], &db_path)` → assert stdout contains expected text.
 
 ### Scan/Analysis
 
@@ -211,7 +211,7 @@ Before making any significant change (refactor, bugfix, new feature):
 
 ```sh
 # 1. Initialize or refresh the structural model
-cargo run -- init .
+cargo run -- sync --init .
 
 # 2. Query the entities you'll be touching
 cargo run -- query <module>::<entity>
@@ -296,7 +296,7 @@ This project's self-bootstrapping creates a unique feedback loop: **modeling cog
 - **Every friction point must be captured as an assertion** — `fragility` for the problem, `correction` after the fix. Future agents learn from past pain.
 - **Use experiments for prototypes** — never modify the main model directly when experimenting with improvements to cog itself. Experiment snapshots are lightweight and discardable.
 - **Use backups for large-scale changes** — `cog backup create --name pre-refactor` before schema or architecture changes.
-- **Ground the improvement design** — use `plan:*` grounds for assertions that describe the *planned* improvement, migrate to `code:*` after implementation.
+- **Ground the improvement design** — use `plan:*` grounds for assertions that describe the *planned* improvement, migrate to `code:*` after implementation. If the design-phase entity name doesn't match the scan-produced entity, use `cog migrate <manual> <scan>` to move assertions onto the real code entity.
 - **When the meta-loop reveals a fundamental design limitation** — assert it as an `intent` limitation on the affected module, then experiment with a redesign.
 
 ### Example: Discovering and Fixing a Limitation

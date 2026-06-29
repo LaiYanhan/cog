@@ -67,7 +67,7 @@
 | 列 | 类型 | 说明 |
 |----|------|------|
 | `id` | TEXT PRIMARY KEY | |
-| `action` | TEXT NOT NULL | assert/retract/cascade_mark/depend/verify/sync/delete_entity |
+| `action` | TEXT NOT NULL | assert/retract/cascade_mark/depend/verify/sync/delete_entity/migrate |
 | `target_id` | TEXT NOT NULL | |
 | `detail` | TEXT NOT NULL | |
 | `timestamp` | TEXT NOT NULL | |
@@ -118,9 +118,9 @@ PRAGMA：`foreign_keys = ON`、`journal_mode = WAL`。
 
 `depends_on`。
 
-### ChangelogAction（7）
+### ChangelogAction（8）
 
-`assert`、`retract`、`cascade_mark`、`depend`、`verify`、`sync`、`delete_entity`。
+`assert`、`retract`、`cascade_mark`、`depend`、`verify`、`sync`、`delete_entity`、`migrate`。
 
 ### Visibility（3）
 
@@ -145,6 +145,34 @@ PRAGMA：`foreign_keys = ON`、`journal_mode = WAL`。
 ## Grounds 格式
 
 `source:detail`，两部分须非空。无冒号 → source="note"、detail=整体。`assert` 时 `validate_format()` 校验。常见 source：`code`、`test`、`note`、`plan`、`hypothesis`、`issue`。
+
+## Report 类型（`NextReport`）
+
+`cog next` 返回的 `NextReport` JSON 结构：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `status` | string | `"uninitialized"` / `"ready"` |
+| `phase` | string? | 仅 `status == "ready"` 时出现：`fresh_scan` / `exploring` / `pending_implement` / `post_change` / `debugging` |
+| `active_experiments` | `[{short_id, description, status}]` | 当前活跃实验 |
+| `model` | `NextModelSummary` | 见下 |
+| `covered` | u64 | 有 assertion 的实体数 |
+| `coverage_pct` | f64 | 覆盖率百分比 |
+| `suggestions` | `[{kind, description, next_command}]` | 建议动作 |
+| `stagnation_warning` | string? | 停滞警告 |
+| `unresolved_provisional` | `[string]` | experiment commit 后尚未被 sync 发现的实体名 |
+
+### `NextModelSummary`
+
+| 字段 | 说明 |
+|------|------|
+| `entities` | 实体总数 |
+| `assertions` | 断言总数 |
+| `active` | active 断言数 |
+| `uncertain` | uncertain 断言数 |
+| `retracted` | retracted 断言数 |
+
+（文本输出会将 `status` + `phase` 合成为 `State: ready (exploring)` 形式。）
 
 ## 迁移
 

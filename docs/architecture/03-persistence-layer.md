@@ -49,7 +49,7 @@ pub struct SqliteRepository { pub(crate) conn: Connection }
 
 **`open_in_memory()`**（仅 `#[cfg(test)]`）：零磁盘 I/O，完整 SQL 语义（FK 约束、事务、级联删除）。所有单元测试用此。**不**实现 `InMemoryRepository`——`HashMap` 无法忠实模拟这些 SQL 语义。
 
-**`transaction(f)`**：`BEGIN IMMEDIATE` → `f()` → `COMMIT`/`ROLLBACK`。仅 `sync`（非空跑）用它保证原子性。
+**`transaction(f)`**：`BEGIN IMMEDIATE` → `f()` → `COMMIT`/`ROLLBACK`。需要单命令原子性的内部操作（如 `delete_entity`、`transfer_entity`）使用它；`sync` 不再整体包裹，以避免与 `delete_entity` 的自身事务嵌套。
 
 **`checkpoint_wal()`**：`PRAGMA wal_checkpoint(TRUNCATE)`，在 `backup restore` 等外部文件操作前调用，确保 WAL 写入落盘。
 
@@ -64,7 +64,7 @@ pub struct SqliteRepository { pub(crate) conn: Connection }
 
 ## 哪些命令需要具体类型
 
-几乎所有命令接受 `&dyn Repository` 并通过 trait 方法操作。**唯一例外是 `sync`**：它需要 `store.transaction()` 包裹整个扫描+写入，因此 `cli.rs` 直接传 `&SqliteRepository`。
+几乎所有命令接受 `&dyn Repository` 并通过 trait 方法操作。**`sync` 仍由 `cli.rs` 传 `&SqliteRepository`**（历史原因：曾需要具体类型做外层事务），但实现上已不再依赖事务包裹，未来可改为 `&dyn Repository`。
 
 > 历史记录：`retract` 曾因 `transaction()` 需要 `&SqliteRepository`。当前 `CascadeEngine::retract` 已重构为接受 `&dyn Repository`（级联逐条提交而非整体事务），故 `retract` 命令现在也用 `&dyn Repository`。
 

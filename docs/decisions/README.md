@@ -57,6 +57,7 @@
 | [ADR-18](#adr-18-has_drift-结构体字段) | `has_drift` 字段非文本解析 | 生效 |
 | [ADR-19](#adr-19-未实现的-cli-设计) | next --verbose / 前缀等 | 未实现 |
 | [ADR-20](#adr-20-停滞检测只看写操作) | changelog 只记写操作 | 生效 |
+| [ADR-21](#adr-21-新增-cog-migrate-调和设计与代码实体命名) | `cog migrate` 调和 Manual/Scan 命名 | 生效 |
 
 ---
 
@@ -157,3 +158,7 @@
 ### ADR-20 停滞检测只看写操作
 
 **选择**：changelog 只记录写操作（Assert/Retract/Depend/Sync/Verify），停滞检测基于此。**理由**：为检测"反复 query 但不 assert"需为只读操作写 changelog——DB 写入量增 2-5 倍/epoch，changelog 膨胀。真正的停滞（verify 循环、experiment stale）已能由写操作检测。
+
+### ADR-21 新增 `cog migrate` 调和设计与代码实体命名
+
+**选择**：新增 `cog migrate <from> <to>`，把 Manual-origin 设计实体的全部 assertion + entity_relation 改挂到 Scan-origin 真实实体，再删除源。**理由**：设计阶段用逻辑名（如 `myapp::lexer::Lexer`）记录 `plan:` grounds；实现后 sync 产出路径名（如 `src::lexer::Lexer`）。若无法调和，设计断言沦为永久孤儿，`verify` 永久报 `OrphanManualEntity`。迁移由显式命令执行（非自动 magic 匹配），避免误合并不相关实体；重复 relation 由 `UNIQUE` 约束自然丢弃。

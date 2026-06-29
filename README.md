@@ -64,6 +64,10 @@ cog retract <id> --reason "<why>"
 
 # Delete an entity and ALL its data (cascading)
 cog delete-entity <qualified_name>
+
+# Migrate assertions from a design-phase entity onto the real scan entity
+# (reconciles names like myapp::lexer::Lexer with src::lexer::Lexer)
+cog migrate <from_entity> <to_entity>
 ```
 
 ### Reading from the model
