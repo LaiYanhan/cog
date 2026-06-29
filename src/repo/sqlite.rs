@@ -134,6 +134,9 @@ impl Repository for SqliteRepository {
     fn delete_entity(&self, qualified_name: &str) -> Result<bool> {
         self.delete_entity(qualified_name)
     }
+    fn transfer_entity(&self, from_id: &str, to_id: &str) -> Result<(usize, usize)> {
+        self.transfer_entity(from_id, to_id)
+    }
     fn create_assertion(
         &self,
         entity_id: &str,

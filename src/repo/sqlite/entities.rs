@@ -324,6 +324,48 @@ impl SqliteRepository {
         Ok(true)
     }
 
+    /// Re-assign all assertions and entity relations from `from_id` onto `to_id`,
+    /// then delete `from_id`. Used by `cog migrate` to reconcile a design-phase
+    /// (Manual) entity with the real (Scan) entity later produced by sync.
+    ///
+    /// Returns `(assertions_moved, relations_on_source)`. Relation rows that would
+    /// duplicate an existing relation on `to_id` are dropped via `UPDATE OR IGNORE`
+    /// (the `UNIQUE(from_entity, to_entity, kind)` constraint) — the link already
+    /// holds on the target. Evidence follows its assertion automatically.
+    pub(super) fn transfer_entity(&self, from_id: &str, to_id: &str) -> Result<(usize, usize)> {
+        self.transaction(|| {
+            let rels_on_source: i64 = self.conn.query_row(
+                "SELECT COUNT(*) FROM entity_relations WHERE from_entity = ?1 OR to_entity = ?1",
+                params![from_id],
+                |row| row.get(0),
+            )?;
+
+            let moved_assertions = self
+                .conn
+                .execute(
+                    "UPDATE assertions SET entity_id = ?1 WHERE entity_id = ?2",
+                    params![to_id, from_id],
+                )
+                .context("failed to re-assign assertions during transfer")?;
+
+            // Repoint both relation endpoints; drop dupes that already exist on target.
+            self.conn.execute(
+                "UPDATE OR IGNORE entity_relations SET from_entity = ?1 WHERE from_entity = ?2",
+                params![to_id, from_id],
+            )?;
+            self.conn.execute(
+                "UPDATE OR IGNORE entity_relations SET to_entity = ?1 WHERE to_entity = ?2",
+                params![to_id, from_id],
+            )?;
+
+            self.conn
+                .execute("DELETE FROM entities WHERE id = ?1", params![from_id])
+                .context("failed to delete source entity during transfer")?;
+
+            Ok((moved_assertions, rels_on_source as usize))
+        })
+    }
+
     /// Find entities whose qualified name ends with `::{short_name}`.
     ///
     /// Also normalises Python-style `.` separators to `::` so that

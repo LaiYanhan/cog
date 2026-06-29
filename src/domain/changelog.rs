@@ -14,6 +14,7 @@ pub enum ChangelogAction {
     Verify,
     Sync,
     DeleteEntity,
+    Migrate,
 }
 
 impl Display for ChangelogAction {
@@ -26,6 +27,7 @@ impl Display for ChangelogAction {
             Self::Verify => "verify",
             Self::Sync => "sync",
             Self::DeleteEntity => "delete_entity",
+            Self::Migrate => "migrate",
         })
     }
 }
@@ -42,6 +44,7 @@ impl FromStr for ChangelogAction {
             "verify" => Ok(Self::Verify),
             "sync" => Ok(Self::Sync),
             "delete_entity" => Ok(Self::DeleteEntity),
+            "migrate" => Ok(Self::Migrate),
             _ => Err("invalid changelog action"),
         }
     }

@@ -374,3 +374,174 @@ fn next_in_debugging_after_correction_shows_entity_names() {
         "should suggest querying the specific entity, got:\n{next_output}"
     );
 }
+
+// ── from-scratch bootstrap + sync stale-removal regressions ────────────────
+
+#[test]
+fn sync_init_on_empty_dir_succeeds_and_advances_workflow() {
+    // #1/#2: empty-dir sync --init used to exit 1 and leave the workflow stuck
+    // at Uninit, dead-locking `cog next` into "run sync" forever. It must now
+    // succeed so the design phase can bootstrap via `cog assert ... --grounds plan:`.
+    let tmp = tempdir().expect("tempdir");
+    let root = tmp.path();
+    let cog_dir = root.join(".cog");
+    std::fs::create_dir_all(&cog_dir).unwrap();
+    let db = cog_dir.join("cog.db");
+
+    let out = run(&db, &["sync", "--init"]);
+    assert!(
+        out.status.success(),
+        "sync --init on empty dir should succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("No source files found yet"),
+        "expected design-phase bootstrap hint, got: {}",
+        stdout
+    );
+
+    // `next` must not dead-loop back into "run sync" / "no cognitive model".
+    let next = run_ok(&db, &["next"]);
+    assert!(
+        !next.contains("No cognitive model found"),
+        "next still dead-loops to sync:\n{next}"
+    );
+    assert!(
+        next.contains("fresh_scan"),
+        "expected workflow to advance to fresh_scan, got:\n{next}"
+    );
+}
+
+#[test]
+fn sync_removes_stale_entity_without_transaction_crash() {
+    // #3: sync was wrapped in an outer transaction while delete_entity opens
+    // its own → nested BEGIN crashed ("cannot start a transaction within a
+    // transaction") whenever a stale entity had to be removed. This is a
+    // subprocess test so it exercises the real CLI dispatch path.
+    let tmp = tempdir().expect("tempdir");
+    let root = tmp.path();
+    let cog_dir = root.join(".cog");
+    std::fs::create_dir_all(&cog_dir).unwrap();
+    let db = cog_dir.join("cog.db");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/lib.rs"),
+        "pub fn alpha() {}\npub fn beta() {}\n",
+    )
+    .unwrap();
+
+    let init = run(&db, &["sync", "--init"]);
+    assert!(
+        init.status.success(),
+        "initial sync failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Remove beta → it becomes a stale Scan-origin entity.
+    std::fs::write(root.join("src/lib.rs"), "pub fn alpha() {}\n").unwrap();
+
+    let out = run(&db, &["sync"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "sync after removing code must not crash (transaction regression):\n{stderr}"
+    );
+    assert!(
+        !stderr.to_lowercase().contains("transaction"),
+        "sync must not error on transactions, got: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("stale"),
+        "expected stale removal report, got: {stdout}"
+    );
+
+    let idx = run_ok(&db, &["index", "--verbose"]);
+    assert!(
+        !idx.contains("beta"),
+        "stale entity beta still present:\n{idx}"
+    );
+    assert!(idx.contains("alpha"), "alpha should remain:\n{idx}");
+}
+
+#[test]
+fn migrate_moves_assertions_from_manual_to_scan_entity() {
+    // #4: design-phase assertions recorded against a Manual entity (logical name)
+    // become orphans once sync produces the path-named Scan entity. `cog migrate`
+    // must re-assign the assertions onto the real entity and delete the orphan.
+    let tmp = tempdir().expect("tempdir");
+    let root = tmp.path();
+    let cog_dir = root.join(".cog");
+    std::fs::create_dir_all(&cog_dir).unwrap();
+    let db = cog_dir.join("cog.db");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/lib.rs"),
+        "pub struct Lexer {}\nimpl Lexer { pub fn tokenize(&self) {} }\n",
+    )
+    .unwrap();
+
+    run_ok(&db, &["sync", "--init"]);
+
+    // Design-phase assertion on a logical name that won't match the scan name.
+    run_ok(
+        &db,
+        &[
+            "assert",
+            "myapp::lexer::Lexer",
+            "--kind",
+            "contract",
+            "--claim",
+            "single-pass tokenizer",
+            "--grounds",
+            "plan:design",
+        ],
+    );
+    run_ok(
+        &db,
+        &[
+            "assert",
+            "myapp::lexer::Lexer",
+            "--kind",
+            "fragility",
+            "--claim",
+            "assumes utf8",
+            "--grounds",
+            "plan:design",
+        ],
+    );
+
+    // The scan entity is path-named (src::lib::Lexer); the manual one is an orphan.
+    // verify exits non-zero when issues exist, so use `run` and inspect stdout.
+    let v_out = run(&db, &["verify"]);
+    let v = String::from_utf8_lossy(&v_out.stdout);
+    assert!(
+        v.contains("OrphanManualEntity") && v.contains("myapp::lexer::Lexer"),
+        "expected orphan before migrate, got: {v}"
+    );
+
+    let out = run_ok(&db, &["migrate", "myapp::lexer::Lexer", "src::lib::Lexer"]);
+    assert!(
+        out.contains("Migrated 2 assertion"),
+        "expected 2 migrated, got: {out}"
+    );
+    assert!(
+        out.contains("Source entity deleted"),
+        "expected source deletion, got: {out}"
+    );
+
+    // Assertions now live on the real entity; orphan cleared.
+    let q = run_ok(&db, &["query", "src::lib::Lexer"]);
+    assert!(
+        q.contains("single-pass tokenizer") && q.contains("assumes utf8"),
+        "assertions should have moved to src::lib::Lexer, got: {q}"
+    );
+
+    let v2_out = run(&db, &["verify"]);
+    let v2 = String::from_utf8_lossy(&v2_out.stdout);
+    assert!(
+        !v2.contains("myapp::lexer::Lexer"),
+        "orphan should be cleared, got: {v2}"
+    );
+}

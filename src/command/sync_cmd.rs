@@ -49,10 +49,6 @@ impl SyncContext {
             .unwrap_or(0)
     }
 
-    fn entities_created(&self) -> usize {
-        self.dir_entities.len() + self.file_entities.len() + self.def_count
-    }
-
     fn relations_created(&self) -> usize {
         self.contains_count + self.uses_count + self.calls_count
     }
@@ -454,7 +450,12 @@ fn build_report(
     SyncReport {
         files_scanned: result.files_scanned,
         files_by_language: result.files_by_language.clone(),
-        entities_created: ctx.entities_created(),
+        // Genuinely-new entities, not upserts. after = before + created - removed,
+        // so created = after - before + removed. Signed math: removed can exceed
+        // created when only deletions happen.
+        entities_created: (after_entities as i64 - before_entities as i64
+            + drift.removed.len() as i64)
+            .max(0) as usize,
         entities_removed: drift.removed.len(),
         relations_created: ctx.relations_created(),
         entity_counts_by_kind: entity_counts,
@@ -509,10 +510,22 @@ pub fn execute(
     let result = Scanner::new().scan(&config)?;
 
     if result.files_scanned == 0 {
-        return Ok(CommandOutput::with_exit_code(
-            format!("No source files found at {}", scan_root.display()),
-            1,
-        ));
+        // Empty project — e.g. the design phase before any code exists. The model
+        // is already open; treat empty as a valid initial state (exit 0) so the
+        // from-scratch workflow can bootstrap via `cog assert ... --grounds plan:`,
+        // instead of dead-locking the workflow on a sync that can never find files.
+        let msg = if dry_run {
+            format!(
+                "No source files found at {} — nothing to scan yet.",
+                scan_root.display()
+            )
+        } else {
+            format!(
+                "Model initialized at {}.\nNo source files found yet — start recording design with:\n  cog assert <entity> --kind <contract|intent|invariant|fragility|correction> --claim \"...\" --grounds \"plan:<doc>\"",
+                db_path.display()
+            )
+        };
+        return Ok(CommandOutput::success(msg));
     }
 
     // Dry-run path: just summarise
@@ -553,6 +566,11 @@ pub fn execute(
     // Drift cleanup
     let scanned_names = collect_scanned_names(&result, &scan_root);
     let (removed, skipped) = remove_stale_entities(repo, &scanned_names)?;
+    // Snapshot the entity count now (stable from here on — fan/provisional steps
+    // below don't add rows) to report genuinely-new entities, not upserts.
+    let after_entities = repo.list_entities()?.len();
+    let entities_created =
+        (after_entities as i64 - before_entities as i64 + removed.len() as i64).max(0) as usize;
 
     // Collect assertions on stale-skipped entities (they have assertions that may need review)
     let mut affected_assertions: Vec<(String, Assertion)> = Vec::new();
@@ -574,7 +592,7 @@ pub fn execute(
         "*",
         &format!(
             "created={} removed={} relations={}",
-            ctx.entities_created(),
+            entities_created,
             removed.len(),
             ctx.relations_created(),
         ),
@@ -599,7 +617,6 @@ pub fn execute(
     };
 
     // Build report
-    let after_entities = repo.list_entities()?.len();
     let after_assertions = repo.list_assertions()?.len();
     let report = build_report(
         &result,

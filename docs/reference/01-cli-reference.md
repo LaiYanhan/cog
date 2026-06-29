@@ -11,7 +11,7 @@
 
 DB 定位规则（`main.rs`）：`sync --init` 总在 `<CWD>/.cog/cog.db` 创建；否则向上查找现有 `.cog/cog.db`；否则用显式 `--db`；都没有则报错引导 `cog sync --init`。
 
-## 命令清单（16 个）
+## 命令清单（17 个）
 
 ### 写入模型
 
@@ -72,6 +72,14 @@ cog delete-entity <qualified_name>
 ```
 
 级联删除该 entity 的所有 assertion、evidence、relation。
+
+#### `cog migrate` —— 迁移断言到另一实体（调和设计/代码命名）
+
+```
+cog migrate <from_entity> <to_entity>
+```
+
+把 `from` 实体的全部 assertion 与 entity_relation 改挂到 `to` 实体，再删除 `from`。用于调和“设计阶段（Manual，逻辑名）→ sync 产出真实（Scan，路径名）”的命名割裂：设计期断言不再沦为孤儿。evidence 随 assertion 自动迁移；与目标已有的重复 relation 会被丢弃（`UNIQUE` 约束）。两个实参均走 `resolve_entity`（精确名优先，回退后缀匹配）。
 
 ### 读取模型
 

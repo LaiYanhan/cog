@@ -30,6 +30,9 @@ pub trait Repository {
         prefix: Option<&str>,
     ) -> Result<Vec<(Entity, usize)>>;
     fn delete_entity(&self, qualified_name: &str) -> Result<bool>;
+    /// Re-assign all assertions and entity relations from one entity to another,
+    /// then delete the source. Returns `(assertions_moved, relations_on_source)`.
+    fn transfer_entity(&self, from_id: &str, to_id: &str) -> Result<(usize, usize)>;
 
     // ── Assertion ───────────────────────────────────────────────────────────
 

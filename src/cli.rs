@@ -55,6 +55,8 @@ pub enum Commands {
     Stats(StatsArgs),
     /// Delete an entity and all its assertions, evidence, and relations
     DeleteEntity(DeleteEntityArgs),
+    /// Move all assertions and relations from one entity onto another (reconcile design/code names)
+    Migrate(MigrateArgs),
     /// Run hypothesis experiments without modifying the real model
     Experiment {
         #[command(subcommand)]
@@ -234,6 +236,11 @@ impl Cli {
                 // may suggest verify due to the destructive operation.
                 Ok(out)
             }
+            Commands::Migrate(args) => {
+                let out = command::migrate_cmd::execute(store, &args.from, &args.to)?;
+                wf.transition_explore();
+                Ok(out)
+            }
             Commands::Experiment { action } => {
                 let out = self.run_experiment(action, &cog_dir, store)?;
                 if matches!(action, ExperimentAction::Commit { .. }) {
@@ -253,14 +260,10 @@ impl Cli {
                 let db = self.db_path();
                 let dry_run = args.dry_run;
                 let output = self.output;
-                let out = if dry_run {
-                    command::sync_cmd::execute(store, &db, true, lang_list, output)?
-                } else {
-                    // Wrap non-dry-run sync in a transaction for atomicity
-                    store.transaction(|| {
-                        command::sync_cmd::execute(store, &db, false, lang_list, output)
-                    })?
-                };
+                // No outer transaction: sync is idempotent and re-runnable, and
+                // delete_entity (stale cleanup) manages its own transaction —
+                // wrapping here nests BEGIN IMMEDIATE and crashes on stale removal.
+                let out = command::sync_cmd::execute(store, &db, dry_run, lang_list, output)?;
                 if out.exit_code == 0 && !dry_run {
                     if matches!(wf, WorkflowState::Uninit) {
                         wf.transition_init().ok();

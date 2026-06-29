@@ -128,6 +128,14 @@ pub struct DeleteEntityArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct MigrateArgs {
+    /// Source entity (typically a Manual/design-phase entity) to move knowledge FROM
+    pub from: String,
+    /// Target entity (typically the real Scan entity) to move knowledge ONTO
+    pub to: String,
+}
+
+#[derive(Debug, Args)]
 pub struct SyncArgs {
     /// Initialize a new cognitive model at CWD before syncing
     #[arg(long)]
