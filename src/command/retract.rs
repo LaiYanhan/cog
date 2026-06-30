@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 
 use crate::command::CommandOutput;
-use crate::domain::StatusMessage;
+use crate::domain::{CascadeReason, StatusMessage};
 use crate::format::{self, OutputFormat, TextRenderer};
 use crate::repo::Repository;
 use crate::space::CascadeEngine;
@@ -32,10 +32,21 @@ pub fn execute(
     }
 
     let msg = TextRenderer::cascade_report(&result, &entity_name, &remaining);
-    Ok(CommandOutput::success(format::emit_report(
-        &StatusMessage { message: msg },
-        output,
-    )))
+    let mut out =
+        CommandOutput::success(format::emit_report(&StatusMessage { message: msg }, output));
+    let (mut marked_uncertain, mut ground_weakened) = (0usize, 0usize);
+    for a in &result.affected {
+        match a.cascade_reason {
+            CascadeReason::MarkedUncertain => marked_uncertain += 1,
+            CascadeReason::GroundWeakened => ground_weakened += 1,
+        }
+    }
+    out.metrics = Some(serde_json::json!({
+        "marked_uncertain": marked_uncertain,
+        "ground_weakened": ground_weakened,
+        "total_affected": result.affected.len()
+    }));
+    Ok(out)
 }
 
 #[cfg(test)]

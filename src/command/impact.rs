@@ -7,7 +7,15 @@ use crate::space::ImpactEngine;
 
 pub fn execute(repo: &dyn Repository, entity: &str, output: OutputFormat) -> Result<CommandOutput> {
     let impact = ImpactEngine::analyze(repo, entity)?;
-    Ok(CommandOutput::success(format::emit_report(&impact, output)))
+    let mut out = CommandOutput::success(format::emit_report(&impact, output));
+    out.metrics = Some(serde_json::json!({
+        "downstream": impact.downstream_entities.len(),
+        "affected_assertions": impact.affected_assertions.len(),
+        "blind_downstream": impact.blind_downstream,
+        "downstream_coverage": impact.downstream_coverage,
+        "risk_score": impact.risk_assessment.as_ref().map(|r| r.risk_score)
+    }));
+    Ok(out)
 }
 
 #[cfg(test)]

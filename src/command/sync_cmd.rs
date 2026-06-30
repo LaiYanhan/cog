@@ -629,6 +629,15 @@ pub fn execute(
 
     let mut out = CommandOutput::success(format::emit_report(&report, output));
     out.has_drift = report.has_drift;
+    out.metrics = Some(serde_json::json!({
+        "entities_created": report.entities_created,
+        "entities_removed": report.entities_removed,
+        "relations": {
+            "contains": ctx.contains_count,
+            "uses": ctx.uses_count,
+            "calls": ctx.calls_count
+        }
+    }));
     Ok(out)
 }
 
