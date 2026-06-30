@@ -7,6 +7,7 @@ mod experiment;
 mod format;
 mod repo;
 mod space;
+mod usage;
 mod workflow;
 use anyhow::{Context, Result};
 use clap::Parser;

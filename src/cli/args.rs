@@ -150,3 +150,10 @@ pub struct SyncArgs {
 
 #[derive(Debug, Args)]
 pub struct NextArgs;
+
+#[derive(Debug, Args)]
+pub struct UsageArgs {
+    /// Dump raw events (one JSON object per line) instead of the summary
+    #[arg(long)]
+    pub raw: bool,
+}

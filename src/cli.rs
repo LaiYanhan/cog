@@ -77,6 +77,9 @@ pub enum Commands {
     Next(NextArgs),
     /// Sync the cognitive model with the codebase (idempotent). Use --init to create a new model.
     Sync(SyncArgs),
+
+    /// Show local usage statistics (command frequency, read/write ratio, sessions)
+    Usage(UsageArgs),
 }
 
 impl Cli {
@@ -134,8 +137,51 @@ impl Cli {
         // Ensure .cog/ dir exists for workflow state
         let _ = std::fs::create_dir_all(&cog_dir);
         let mut wf = WorkflowState::load(&cog_dir);
+        let phase_before = self.phase_label(&wf);
 
-        let result = match &self.command {
+        let started = std::time::Instant::now();
+        let result = self.dispatch(&mut wf, store, &cog_dir);
+        let duration_ms = started.elapsed().as_millis() as u64;
+
+        // Record usage (best-effort; never breaks the command). Skip the
+        // `usage` command itself so reading the log doesn't pollute it.
+        if !matches!(self.command, Commands::Usage(_)) {
+            let phase_after = self.phase_label(&wf);
+            let (phase_from, phase_to) = if phase_before != phase_after {
+                (Some(phase_before.clone()), Some(phase_after))
+            } else {
+                (None, None)
+            };
+            crate::usage::recorder::record(
+                &cog_dir,
+                &crate::usage::UsageEvent {
+                    ts: chrono::Utc::now(),
+                    command: self.command_name(),
+                    ok: result.is_ok(),
+                    exit_code: result.as_ref().ok().map(|o| o.exit_code),
+                    duration_ms,
+                    has_drift: result.as_ref().ok().map(|o| o.has_drift).unwrap_or(false),
+                    phase_from,
+                    phase_to,
+                    args: self.command_args(),
+                    metrics: result.as_ref().ok().and_then(|o| o.metrics.clone()),
+                },
+            );
+        }
+
+        self.apply_workflow_then_save(&mut wf, &cog_dir, result)
+    }
+
+    /// The actual command dispatch. Every command flows through here, so this
+    /// is the single chokepoint for workflow transitions. Extracted from `run`
+    /// so usage can be recorded on both the Ok and Err paths.
+    fn dispatch(
+        &self,
+        wf: &mut WorkflowState,
+        store: &SqliteRepository,
+        cog_dir: &Path,
+    ) -> Result<CommandOutput> {
+        match &self.command {
             Commands::Query(args) => {
                 let out = command::query::execute(
                     store,
@@ -242,10 +288,10 @@ impl Cli {
                 Ok(out)
             }
             Commands::Experiment { action } => {
-                let out = self.run_experiment(action, &cog_dir, store)?;
+                let out = self.run_experiment(action, cog_dir, store)?;
                 if matches!(action, ExperimentAction::Commit { .. }) {
                     // Model updated but code not yet changed — track the gap
-                    if let WorkflowState::Ready { phase } = &mut wf {
+                    if let WorkflowState::Ready { phase } = &mut *wf {
                         *phase = WorkflowPhase::PendingImplement;
                     }
                 }
@@ -280,10 +326,121 @@ impl Cli {
                 }
                 Ok(out)
             }
-            Commands::Next(_) => command::next_cmd::execute(store, &wf, &cog_dir, self.output),
-        };
+            Commands::Next(_) => command::next_cmd::execute(store, wf, cog_dir, self.output),
+            Commands::Usage(args) => {
+                command::usage_cmd::execute(store, cog_dir, args.raw, self.output)
+            }
+        }
+    }
 
-        self.apply_workflow_then_save(&mut wf, &cog_dir, result)
+    /// Command verb for the usage log.
+    fn command_name(&self) -> String {
+        match &self.command {
+            Commands::Query(_) => "query",
+            Commands::Impact(_) => "impact",
+            Commands::Trace(_) => "trace",
+            Commands::Index(_) => "index",
+            Commands::Assert(_) => "assert",
+            Commands::Retract(_) => "retract",
+            Commands::Depend(_) => "depend",
+            Commands::Verify(_) => "verify",
+            Commands::Export(_) => "export",
+            Commands::Stats(_) => "stats",
+            Commands::DeleteEntity(_) => "delete-entity",
+            Commands::Migrate(_) => "migrate",
+            Commands::Experiment { .. } => "experiment",
+            Commands::Backup { .. } => "backup",
+            Commands::Recover { .. } => "recover",
+            Commands::Next(_) => "next",
+            Commands::Sync(_) => "sync",
+            Commands::Usage(_) => "usage",
+        }
+        .to_string()
+    }
+
+    /// Structured args for the usage log — entity refs, IDs, kinds, flags only.
+    /// Never free-text prose (claims/reasons stay in cog.db).
+    fn command_args(&self) -> serde_json::Value {
+        match &self.command {
+            Commands::Query(a) => serde_json::json!({
+                "entity": a.entity,
+                "all": a.all,
+                "compact": a.compact,
+                "relations": a.relations
+            }),
+            Commands::Impact(a) => serde_json::json!({ "entity": a.entity }),
+            Commands::Trace(a) => serde_json::json!({ "entity": a.entity }),
+            Commands::Index(a) => serde_json::json!({
+                "kind": format!("{:?}", a.kind),
+                "origin": format!("{:?}", a.origin),
+                "prefix": a.prefix,
+                "verbose": a.verbose,
+                "uncovered": a.uncovered
+            }),
+            Commands::Assert(a) => serde_json::json!({
+                "entity": a.entity,
+                "kind": format!("{:?}", a.kind),
+                "grounds": a.grounds,
+                "depends_on": a.depends_on,
+                "replace": a.replace,
+                "force": a.force
+            }),
+            Commands::Retract(a) => serde_json::json!({ "id": a.id }),
+            Commands::Depend(a) => serde_json::json!({
+                "entity_a": a.entity_a,
+                "on": a.on,
+                "kind": format!("{:?}", a.kind)
+            }),
+            Commands::Verify(a) => serde_json::json!({
+                "scope": a.scope,
+                "clean": a.clean,
+                "scan": a.scan
+            }),
+            Commands::Export(a) => serde_json::json!({ "format": format!("{:?}", a.format) }),
+            Commands::Stats(_) => serde_json::json!({}),
+            Commands::DeleteEntity(a) => serde_json::json!({ "entity": a.entity }),
+            Commands::Migrate(a) => serde_json::json!({ "from": a.from, "to": a.to }),
+            Commands::Sync(a) => serde_json::json!({
+                "init": a.init,
+                "dry_run": a.dry_run,
+                "lang": a.lang
+            }),
+            Commands::Next(_) => serde_json::json!({}),
+            Commands::Usage(a) => serde_json::json!({ "raw": a.raw }),
+            Commands::Experiment { action } => {
+                serde_json::json!({ "sub": self.variant_name(action) })
+            }
+            Commands::Backup { action } => {
+                serde_json::json!({ "sub": self.variant_name(action) })
+            }
+            Commands::Recover { apply } => serde_json::json!({ "apply": apply }),
+        }
+    }
+
+    /// Debug-print an enum value, then take the variant name before any
+    /// `(` or `{` — e.g. `Commit { id: ".." }` → `"commit"`, `List` → `"list"`.
+    fn variant_name<T: std::fmt::Debug>(&self, v: &T) -> String {
+        let s = format!("{v:?}");
+        s.split(['(', '{'])
+            .next()
+            .unwrap_or(&s)
+            .trim()
+            .to_lowercase()
+    }
+
+    /// Workflow phase as a stable string label, for the usage log.
+    fn phase_label(&self, wf: &WorkflowState) -> String {
+        match wf {
+            WorkflowState::Uninit => "uninit".to_string(),
+            WorkflowState::Ready { phase } => match phase {
+                WorkflowPhase::FreshScan => "fresh_scan",
+                WorkflowPhase::Exploring => "exploring",
+                WorkflowPhase::PendingImplement => "pending_implement",
+                WorkflowPhase::PostChange => "post_change",
+                WorkflowPhase::Debugging => "debugging",
+            }
+            .to_string(),
+        }
     }
 
     fn run_experiment(

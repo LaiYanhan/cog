@@ -14,6 +14,7 @@ pub mod retract;
 pub mod stats;
 pub mod sync_cmd;
 pub mod trace;
+pub mod usage_cmd;
 pub mod verify;
 
 pub struct CommandOutput {
@@ -23,6 +24,10 @@ pub struct CommandOutput {
     /// Used by the CLI dispatch to drive WorkflowState transitions
     /// without parsing the formatted text output.
     pub has_drift: bool,
+    /// Optional structured metrics attached by the command (e.g. sync's
+    /// relation breakdown). Captured by the usage log at the dispatch
+    /// chokepoint; `None` for commands that attach nothing.
+    pub metrics: Option<serde_json::Value>,
 }
 impl CommandOutput {
     pub fn success(text: impl Into<String>) -> Self {
@@ -30,6 +35,7 @@ impl CommandOutput {
             text: text.into(),
             exit_code: 0,
             has_drift: false,
+            metrics: None,
         }
     }
 
@@ -38,6 +44,7 @@ impl CommandOutput {
             text: text.into(),
             exit_code,
             has_drift: false,
+            metrics: None,
         }
     }
 
