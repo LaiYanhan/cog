@@ -1,0 +1,66 @@
+# config_cog_mini.toml — SWE-CI + cog — RDD experiment (the cog arm of the RDD A/B)
+#
+# === mode: built-in SWE-CI switch (config.py validates "tdd" | "rdd") ===
+#   rdd here: programmer container has tests REMOVED (run.py deletes /app/code/tests);
+#   architect emits a self-contained spec. With no test oracle, the programmer leans on
+#   cog's persistent model (query/impact/assert) across epochs — this is where cog's value
+#   is meant to show up. Pair this run against config_baseline.toml (baseline-mini-rdd).
+#
+# === RDD A/B is cog-rdd vs baseline-rdd, NOT vs any TDD baseline ===
+#   experiment_name is "cog-mini-rdd" so TDD results (cog-mini, baseline-mini) stay intact.
+#   init is mode-agnostic → reuse it via --clone-init-from baseline-mini.
+#
+# Usage:
+#   sc start docker.service
+#   cargo b -r && cp target/release/cog benchmark/SWE-CI/
+#   cd benchmark/SWE-CI && source .venv/bin/activate
+#   rs prompt.jinja2 shixi:~/github/SWE-CI/src/swe_ci/benchmark/
+#   PYTHONPATH=src python -u -m swe_ci.evaluate --config_file config_cog_mini.toml \
+#       --clone-init-from baseline-mini
+
+experiment_name = "cog-mini-rdd"
+splitting       = "mini"
+save_root_dir   = "."
+hf_token        = "none"
+hf_repo_id      = "skylenage-ai/SWE-CI"
+agent_name      = "opencode"
+cog             = true                          # Enables cog prompt variant + cog Dockerfile
+
+# ✏️ LLM API credentials
+api_key    = "sk-565880aabf2d44359ac4c572b3fea8fa"
+base_url   = "https://api.deepseek.com"
+model_name = "deepseek-chat"
+
+mode = "rdd"
+
+[agent]
+node_version = "22.18.0"
+npm_pkg      = "opencode-ai"
+npm_bin      = "opencode"
+dockerfile   = "Dockerfile.opencode-cog"       # Dockerfile with cog COPY layer
+
+[init]
+max_workers = 4
+
+[evolve]
+max_epoch   = 20
+max_workers = 4
+
+[evolve.architect]
+timeout  = 3600
+max_try  = 10
+
+[evolve.programmer]
+timeout  = 3600
+max_try  = 10
+
+[docker]
+storage_disk       = ""
+cpus               = ""
+read_bps           = "128mb"
+write_bps          = "128mb"
+memory             = "8192mb"
+memory_reservation = "4096mb"
+
+[pytest]
+timeout = 3600

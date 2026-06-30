@@ -130,6 +130,8 @@ def init_tasks() -> bool:
     # Step 1: Initialize directoires and paths
     experiment_dir = Path("experiments") / CONFIG.experiment_name
     experiment_dir.mkdir(parents=True, exist_ok=True)
+    from .run import _write_meta_if_missing
+    _write_meta_if_missing(experiment_dir)
     metadata_file = Path(CONFIG.save_root_dir) / "metadata" / f"{CONFIG.splitting}.csv"
     data_dir = Path(CONFIG.save_root_dir) / "data"
     metadatas = read_csv(metadata_file)

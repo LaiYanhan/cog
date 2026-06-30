@@ -125,7 +125,10 @@ def load_config() -> SimpleNamespace:
         cfg.agent.node_version = getattr(cfg.agent, "node_version", None) or "22.18.0"
         cfg.agent.npm_pkg = getattr(cfg.agent, "npm_pkg", None) or "opencode-ai"
         cfg.agent.npm_bin = getattr(cfg.agent, "npm_bin", None) or "opencode"
-        cfg.agent.dockerfile = str(agent_dir / "Dockerfile.opencode")
+        _df = getattr(cfg.agent, "dockerfile", None)
+        if _df and not Path(_df).is_absolute():
+            _df = str(agent_dir / _df)
+        cfg.agent.dockerfile = _df or str(agent_dir / "Dockerfile.opencode")
     else:
         print(f"Unsupported agent: {cfg.agent_name}", flush=True)
         sys.exit(1)

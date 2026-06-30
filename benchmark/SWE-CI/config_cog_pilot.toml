@@ -1,0 +1,52 @@
+# Usage:
+# sc start docker.service
+# cd benchmark/SWE-CI && source .venv/bin/activate
+# cargo b -r && cp target/release/cog benchmark/SWE-CI/
+# PYTHONPATH=src python -u -m swe_ci.evaluate --config_file config_cog_pilot.toml --clone-init-from baseline-pilot
+
+experiment_name = "cog-pilot-v2"
+splitting       = "pilot"
+save_root_dir   = "."
+hf_token        = "none"
+hf_repo_id      = "skylenage-ai/SWE-CI"
+agent_name      = "opencode"
+cog             = true                          # Enables cog prompt variant + cog Dockerfile
+
+# ✏️ LLM API credentials
+api_key    = "sk-565880aabf2d44359ac4c572b3fea8fa"
+base_url   = "https://api.deepseek.com"
+model_name = "deepseek-chat"
+
+mode = "tdd"
+
+[agent]
+node_version = "22.18.0"
+npm_pkg      = "opencode-ai"
+npm_bin      = "opencode"
+dockerfile   = "Dockerfile.opencode-cog"       # Dockerfile with cog COPY layer
+
+[init]
+max_workers = 4
+
+[evolve]
+max_epoch   = 20
+max_workers = 4
+
+[evolve.architect]
+timeout  = 3600
+max_try  = 10
+
+[evolve.programmer]
+timeout  = 3600
+max_try  = 10
+
+[docker]
+storage_disk       = ""
+cpus               = ""
+read_bps           = "128mb"
+write_bps          = "128mb"
+memory             = "8192mb"
+memory_reservation = "4096mb"
+
+[pytest]
+timeout = 3600

@@ -170,7 +170,8 @@ def call_cli_agent(
         prompt: str, 
         *,
         work_dir: str = "/app",
-        timeout:int
+        timeout: int,
+        save_trajectory_to: Path | None = None,
         ) -> dict:
     agent = CONFIG.agent_name
     func_map = {
@@ -180,4 +181,7 @@ def call_cli_agent(
     if agent not in func_map:
         raise NotImplementedError(f"CONFIG.agent = {agent}")
     agent_func = func_map[agent]
-    return agent_func(container_name, prompt, work_dir=work_dir, timeout=timeout)
+    kwargs = {"work_dir": work_dir, "timeout": timeout}
+    if agent == "opencode" and save_trajectory_to is not None:
+        kwargs["save_trajectory_to"] = save_trajectory_to
+    return agent_func(container_name, prompt, **kwargs)

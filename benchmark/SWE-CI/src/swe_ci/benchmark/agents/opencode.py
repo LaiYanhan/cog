@@ -1,4 +1,5 @@
 import json
+import shutil
 import sqlite3
 import tempfile
 import subprocess
@@ -109,7 +110,8 @@ def read_usage(db_path: str) -> dict:
 
 def valid_and_parse(
         container_name: str,
-        result: subprocess.CompletedProcess
+        result: subprocess.CompletedProcess,
+        save_trajectory_to: Path | None = None,
         ) -> dict:
 
     if result.returncode != 0:
@@ -136,12 +138,29 @@ def valid_and_parse(
                     ["docker", "cp", f"{container_name}:{db_remote}{suffix}", f"{local_db}{suffix}"],
                     capture_output=True, text=True,
                 )
+
+            # Save trajectory (full opencode.db) if a path is provided
+            if save_trajectory_to is not None:
+                save_trajectory_to = Path(save_trajectory_to)
+                save_trajectory_to.mkdir(parents=True, exist_ok=True)
+                db_dest = save_trajectory_to / "opencode.db"
+                shutil.copy2(str(local_db), str(db_dest))
+                for suffix in ["-wal", "-shm"]:
+                    src = Path(f"{local_db}{suffix}")
+                    if src.exists():
+                        shutil.copy2(str(src), str(save_trajectory_to / f"opencode.db{suffix}"))
+                # Save stdout/stderr as well
+                if result.stdout:
+                    (save_trajectory_to / "stdout.log").write_text(result.stdout, encoding="utf-8")
+                if result.stderr:
+                    (save_trajectory_to / "stderr.log").write_text(result.stderr, encoding="utf-8")
+
             usage = read_usage(str(local_db))
             return usage
     except Exception as e:
         raise RuntimeError(
             f"Failed to extract token usage from container {container_name}: {e}"
-        ) from e
+            ) from e
 
 
 
@@ -151,6 +170,7 @@ def call_opencode(
         *,
         work_dir: str = "/app",
         timeout: int,
+        save_trajectory_to: Path | None = None,
         ) -> subprocess.CompletedProcess:
     
     setup_opencode(container_name)
@@ -164,4 +184,4 @@ def call_opencode(
         text=True,
         timeout=timeout,
     )
-    return valid_and_parse(container_name, result)
+    return valid_and_parse(container_name, result, save_trajectory_to=save_trajectory_to)

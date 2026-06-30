@@ -8,6 +8,22 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from .utils import *
 from .tools import *
 from swe_ci.config import CONFIG
+import json
+
+
+def _write_meta_if_missing(experiment_dir: Path) -> None:
+    """Write meta.json into experiment dir if it doesn't already exist.
+
+    Captures the config state at experiment creation time so that evaluation
+    scripts can read max_epoch (and other params) from the experiment data
+    itself, without depending on external config files that may change later.
+    """
+    meta_path = experiment_dir / "meta.json"
+    if meta_path.exists():
+        return
+    meta = {"max_epoch": CONFIG.evolve.max_epoch}
+    meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+
 
 
 
@@ -61,6 +77,7 @@ def _run_locked(
         return
 
     # Step 3: Load images and prompts
+    image_tag = ""
     try:
         self_path = Path(__file__).resolve()
         task_id = task_metadata['task_id']
@@ -74,9 +91,10 @@ def _run_locked(
             extra_args = image_extra_args(base_image_tag)
             )
         mode = CONFIG.mode
+        cog_enabled = getattr(CONFIG, "cog", False)
         prompt_file = self_path.parent / "prompt.jinja2"
-        architect_prompt = load_prompt(prompt_file, template_args = {'role': 'architect', "mode": mode})
-        programmer_prompt = load_prompt(prompt_file,template_args = {'role': 'programmer', "mode": mode})
+        architect_prompt = load_prompt(prompt_file, template_args = {'role': 'architect', "mode": mode, "cog": cog_enabled})
+        programmer_prompt = load_prompt(prompt_file, template_args = {'role': 'programmer', "mode": mode, "cog": cog_enabled})
     except Exception as e:
         info = f"❌ Error occurred when loading resources: {repr(e)}"
         logger.exception(info)
@@ -92,6 +110,8 @@ def _run_locked(
             epoch_prefix = f"(Epoch {current_epoch + 1}/{CONFIG.evolve.max_epoch}) "
             shutil.rmtree(tmp_dir, ignore_errors=True)
             (current_dir/"requirement.xml").unlink(missing_ok=True)
+            # Prepare trajectory directory for this epoch
+            traj_dir = task_dir / "trajectories" / f"epoch_{current_epoch + 1:03d}"
             logger.info("(1/7) ✅ Cleaned up temporary files.")
 
             # Step 4.2: Call architect agent with retry mechanism
@@ -103,9 +123,21 @@ def _run_locked(
                     copy_dir_to_container(container_name, current_dir/"non-passed", "/app")
                     architect_result = call_cli_agent(
                         container_name, architect_prompt, 
-                        timeout=CONFIG.evolve.architect.timeout
+                        timeout=CONFIG.evolve.architect.timeout,
+                        save_trajectory_to=traj_dir / "architect",
                         )
-                    copy_file_from_container(container_name, "/app/requirement.xml", current_dir)
+                    # requirement.xml is regenerated on every attempt; overwrite any copy a previous
+                    # attempt left behind, otherwise retries fail here with FileExistsError.
+                    copy_file_from_container(container_name, "/app/requirement.xml", current_dir, overwrite=True)
+                    if cog_enabled and has_container_dir(container_name, "/app/code/.cog"):
+                        # Mirror the container's cog model back to the host so knowledge persists
+                        # across iterations. A bare mkdir copy nests it as .cog/.cog and only works on a
+                        # clean slate; drop any stale local copy first (copy_dir_from_container
+                        # refuses to overwrite) and copy flat via rename.
+                        local_cog = current_dir / "code" / ".cog"
+                        if local_cog.exists():
+                            shutil.rmtree(local_cog, ignore_errors=True)
+                        copy_dir_from_container(container_name, "/app/code/.cog", current_dir / "code", rename=".cog")
                     logger.info(prefix + "✅ The architect agent has generated the requirements.")
                     break
                 except Exception as e:
@@ -130,8 +162,13 @@ def _run_locked(
                     copy_file_to_container(container_name, current_dir/"requirement.xml", "/app")
                     programmer_result = call_cli_agent(
                         container_name, programmer_prompt, 
-                        timeout=CONFIG.evolve.programmer.timeout
+                        timeout=CONFIG.evolve.programmer.timeout,
+                        save_trajectory_to=traj_dir / "programmer",
                         )
+                    # tmp_dir is throwaway per epoch; clear any partial copy a previous attempt left
+                    # so retries don't hit FileExistsError from copy_dir_from_container.
+                    if tmp_dir.exists():
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
                     copy_dir_from_container(container_name, "/app/code", tmp_dir, mkdir=True)
                     if CONFIG.mode == "rdd":
                         shutil.copytree(current_dir/"code"/"tests", tmp_dir/"code"/"tests")
@@ -219,6 +256,7 @@ def run_tasks() -> bool:
     # Step 1: Initialize directoires and paths
     experiment_dir = Path("experiments") / CONFIG.experiment_name
     experiment_dir.mkdir(parents=True, exist_ok=True)
+    _write_meta_if_missing(experiment_dir)
     metadata_file = Path(CONFIG.save_root_dir) / "metadata" / f"{CONFIG.splitting}.csv"
     metadatas = read_csv(metadata_file)
     num_tasks = len(metadatas)

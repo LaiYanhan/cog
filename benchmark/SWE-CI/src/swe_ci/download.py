@@ -56,12 +56,20 @@ def download_hf_folder(
 def download_dataset() -> None:
     disable_progress_bars()
     hf_token = None if CONFIG.hf_token == "none" else CONFIG.hf_token
-    all_split = all_splitting(CONFIG.hf_repo_id)
-    if CONFIG.splitting not in all_split:
-        raise ValueError(f"Expected splitting in {all_split}, but got {CONFIG.splitting}")
-    metadata_path = download_file(
-        CONFIG.hf_repo_id, f"metadata/{CONFIG.splitting}.csv", CONFIG.save_root_dir, hf_token
-        )
+    try:
+        all_split = all_splitting(CONFIG.hf_repo_id)
+        if CONFIG.splitting not in all_split:
+            raise ValueError(f"Expected splitting in {all_split}, but got {CONFIG.splitting}")
+    except Exception:
+        # Custom split — metadata CSV must exist locally at metadata/<splitting>.csv
+        pass
+    local_metadata = Path(CONFIG.save_root_dir) / "metadata" / f"{CONFIG.splitting}.csv"
+    if local_metadata.is_file():
+        metadata_path = str(local_metadata)
+    else:
+        metadata_path = download_file(
+            CONFIG.hf_repo_id, f"metadata/{CONFIG.splitting}.csv", CONFIG.save_root_dir, hf_token
+            )
     metadata = read_csv(metadata_path)
     task_ids = [task['task_id'] for task in metadata]
     total = len(task_ids)

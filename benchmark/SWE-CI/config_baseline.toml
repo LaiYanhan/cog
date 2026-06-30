@@ -1,0 +1,67 @@
+# config_baseline.toml — vanilla SWE-CI (no cog) — RDD BASELINE
+#
+# === mode: built-in SWE-CI switch (config.py validates "tdd" | "rdd") ===
+#   tdd (default): programmer CAN read /app/code/tests/ — a fresh test oracle every epoch.
+#   rdd          : programmer container has tests REMOVED (run.py deletes /app/code/tests);
+#                  architect must emit a self-contained spec (no test refs allowed).
+#                  → programmer loses the oracle, so persistent memory (cog) fills a real
+#                    gap. RDD is the mode where cog's value is NON-REDUNDANT.
+#
+# === RDD needs its OWN baseline — do NOT reuse TDD baselines ===
+#   RDD changes the task itself (different prompt, programmer can't see tests), so
+#   cog-rdd vs baseline-tdd is apples-to-oranges. This file IS the RDD baseline.
+#   Keep existing TDD results (baseline-mini) untouched — that's why experiment_name
+#   below is "baseline-mini-rdd", not "baseline-mini".
+#   init phase is mode-agnostic (only runs pytest to compute the test gap), so reuse it
+#   via --clone-init-from and skip the ~30min init, just re-evolve in RDD.
+#
+# Usage:
+#   scu start docker.service
+#   cd benchmark/SWE-CI && source .venv/bin/activate
+#   PYTHONPATH=src python -u -m swe_ci.evaluate --config_file config_baseline.toml \
+#       --clone-init-from baseline-mini
+
+experiment_name = "baseline-mini-rdd"
+splitting       = "mini"
+save_root_dir   = "."
+hf_token        = "none"
+hf_repo_id      = "skylenage-ai/SWE-CI"
+agent_name      = "opencode"
+
+# ✏️ LLM API credentials
+api_key    = "sk-565880aabf2d44359ac4c572b3fea8fa"
+base_url   = "https://api.deepseek.com"
+model_name = "deepseek-chat"
+
+mode = "rdd"
+
+[agent]
+node_version = "22.18.0"
+npm_pkg      = "opencode-ai"
+npm_bin      = "opencode"
+
+[init]
+max_workers = 4
+
+[evolve]
+max_epoch   = 20
+max_workers = 4
+
+[evolve.architect]
+timeout  = 3600
+max_try  = 10
+
+[evolve.programmer]
+timeout  = 3600
+max_try  = 10
+
+[docker]
+storage_disk       = ""
+cpus               = ""
+read_bps           = "128mb"
+write_bps          = "128mb"
+memory             = "8192mb"
+memory_reservation = "4096mb"
+
+[pytest]
+timeout = 3600
