@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 SWE-CI Experiment Evaluation Script
 
@@ -10,18 +9,19 @@ Usage:
     python evaluate_swe_ci.py --compare <baseline_dir> <cog_dir>
 
 Examples:
-    python evaluate_swe_ci.py SWE-CI/experiments/cog-pilot-v1
-    python evaluate_swe_ci.py --compare SWE-CI/experiments/baseline-pilot SWE-CI/experiments/cog-pilot
+    python evaluate_swe_ci.py experiments/cog-pilot-v1
+    python evaluate_swe_ci.py --compare experiments/baseline-pilot experiments/cog-pilot
 """
 
+import argparse
 import json
 import sqlite3
+import sys
+from collections import defaultdict
+from pathlib import Path
+
 from rich.console import Console
 from rich.table import Table
-import sys
-import argparse
-from pathlib import Path
-from collections import defaultdict
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -56,6 +56,7 @@ def query_db_one(db_path: Path, sql: str, params=()):
 
 # ── Iteration analysis ──────────────────────────────────────────────
 
+
 def analyze_iterations(task_dir: Path) -> dict:
     iterations = read_jsonl(task_dir / "iteration.jsonl")
     if not iterations:
@@ -75,26 +76,47 @@ def analyze_iterations(task_dir: Path) -> dict:
         regression = passed < prev_passed
         arch = rec.get("architect", {})
         prog = rec.get("programmer", {})
-        epochs.append({
-            "epoch": i, "passed": passed, "gap": gap, "regression": regression,
-            "arch_in": arch.get("input_tokens", 0), "arch_out": arch.get("output_tokens", 0),
-            "prog_in": prog.get("input_tokens", 0), "prog_out": prog.get("output_tokens", 0),
-            "arch_t": arch.get("execution_time", 0), "prog_t": prog.get("execution_time", 0),
-        })
+        epochs.append(
+            {
+                "epoch": i,
+                "passed": passed,
+                "gap": gap,
+                "regression": regression,
+                "arch_in": arch.get("input_tokens", 0),
+                "arch_out": arch.get("output_tokens", 0),
+                "prog_in": prog.get("input_tokens", 0),
+                "prog_out": prog.get("output_tokens", 0),
+                "arch_t": arch.get("execution_time", 0),
+                "prog_t": prog.get("execution_time", 0),
+            }
+        )
         prev_passed = passed
 
-    regressions = [{"epoch": e["epoch"], "prev": epochs[i-1]["passed"] if i > 0 else init_passed, "cur": e["passed"]}
-                   for i, e in enumerate(epochs) if e["regression"]]
+    regressions = [
+        {
+            "epoch": e["epoch"],
+            "prev": epochs[i - 1]["passed"] if i > 0 else init_passed,
+            "cur": e["passed"],
+        }
+        for i, e in enumerate(epochs)
+        if e["regression"]
+    ]
 
     final_gap = evo[-1].get("gap", -1) if evo else init_gap
     total_in = sum(e["arch_in"] + e["prog_in"] for e in epochs)
     total_out = sum(e["arch_out"] + e["prog_out"] for e in epochs)
 
     return {
-        "init_passed": init_passed, "init_gap": init_gap, "total_tests": total_tests,
-        "n_epochs": len(evo), "resolved": final_gap == 0, "final_gap": final_gap,
-        "regressions": regressions, "zero_reg": len(regressions) == 0,
-        "total_in": total_in, "total_out": total_out,
+        "init_passed": init_passed,
+        "init_gap": init_gap,
+        "total_tests": total_tests,
+        "n_epochs": len(evo),
+        "resolved": final_gap == 0,
+        "final_gap": final_gap,
+        "regressions": regressions,
+        "zero_reg": len(regressions) == 0,
+        "total_in": total_in,
+        "total_out": total_out,
         "gap_trace": [init_gap] + [e["gap"] for e in epochs],
         "epochs": epochs,
     }
@@ -102,11 +124,17 @@ def analyze_iterations(task_dir: Path) -> dict:
 
 # ── Cog model analysis ──────────────────────────────────────────────
 
+
 def analyze_cog(task_dir: Path) -> dict:
     """Analyze cog model from the last archived snapshot."""
     snapshots = sorted(
-        (d for d in task_dir.iterdir()
-         if d.is_dir() and d.name.startswith("20") and (d / "code" / ".cog" / "cog.db").exists()),
+        (
+            d
+            for d in task_dir.iterdir()
+            if d.is_dir()
+            and d.name.startswith("20")
+            and (d / "code" / ".cog" / "cog.db").exists()
+        ),
         key=lambda d: d.name,
     )
     if not snapshots:
@@ -118,9 +146,13 @@ def analyze_cog(task_dir: Path) -> dict:
     entities = query_db_one(last_db, "SELECT count(*) FROM entities")
     entities = entities[0] if entities else 0
 
-    assertions_raw = query_db(last_db,
-        "SELECT kind, status, claim, entity_id FROM assertions ORDER BY rowid")
-    assertions = [{"kind": r[0], "status": r[1], "claim": r[2], "entity_id": r[3]} for r in assertions_raw]
+    assertions_raw = query_db(
+        last_db, "SELECT kind, status, claim, entity_id FROM assertions ORDER BY rowid"
+    )
+    assertions = [
+        {"kind": r[0], "status": r[1], "claim": r[2], "entity_id": r[3]}
+        for r in assertions_raw
+    ]
 
     active = [a for a in assertions if a["status"] == "active"]
     retracted = [a for a in assertions if a["status"] == "retracted"]
@@ -134,17 +166,23 @@ def analyze_cog(task_dir: Path) -> dict:
         db = snap / "code" / ".cog" / "cog.db"
         ent = query_db_one(db, "SELECT count(*) FROM entities")
         act = query_db_one(db, "SELECT count(*) FROM assertions WHERE status='active'")
-        ret = query_db_one(db, "SELECT count(*) FROM assertions WHERE status='retracted'")
-        growth.append({
-            "snapshot": snap.name,
-            "entities": ent[0] if ent else 0,
-            "active": act[0] if act else 0,
-            "retracted": ret[0] if ret else 0,
-        })
+        ret = query_db_one(
+            db, "SELECT count(*) FROM assertions WHERE status='retracted'"
+        )
+        growth.append(
+            {
+                "snapshot": snap.name,
+                "entities": ent[0] if ent else 0,
+                "active": act[0] if act else 0,
+                "retracted": ret[0] if ret else 0,
+            }
+        )
 
     return {
-        "has_cog": True, "entities": entities,
-        "n_active": len(active), "n_retracted": len(retracted),
+        "has_cog": True,
+        "entities": entities,
+        "n_active": len(active),
+        "n_retracted": len(retracted),
         "kinds": dict(kinds),
         "assertions": assertions,
         "growth": growth,
@@ -152,6 +190,7 @@ def analyze_cog(task_dir: Path) -> dict:
 
 
 # ── Trajectory analysis ─────────────────────────────────────────────
+
 
 def analyze_trajectories(task_dir: Path) -> dict:
     """Analyze programmer trajectories for cog CLI usage and tool breakdown."""
@@ -170,16 +209,20 @@ def analyze_trajectories(task_dir: Path) -> dict:
         epoch_num = int(epoch_dir.name.split("_")[1])
 
         # Tool usage counts from part table
-        tools = query_db(prog_db,
+        tools = query_db(
+            prog_db,
             "SELECT json_extract(data, '$.tool'), count(*) FROM part "
             "WHERE json_extract(data, '$.tool') IS NOT NULL "
-            "GROUP BY json_extract(data, '$.tool')")
+            "GROUP BY json_extract(data, '$.tool')",
+        )
         tool_counts = {r[0]: r[1] for r in tools if r[0]}
 
         # Extract all bash commands containing 'cog' from part table
-        cog_rows = query_db(prog_db,
+        cog_rows = query_db(
+            prog_db,
             "SELECT json_extract(data, '$.state.input.command') FROM part "
-            "WHERE json_extract(data, '$.state.input.command') LIKE '%cog %'")
+            "WHERE json_extract(data, '$.state.input.command') LIKE '%cog %'",
+        )
 
         # Classify cog commands
         cog_cmds = []
@@ -189,25 +232,44 @@ def analyze_trajectories(task_dir: Path) -> dict:
                 continue
             cog_cmds.append(cmd)
             # Classify by subcommand
-            for subcmd in ["sync", "query", "assert", "retract", "verify", "stats",
-                           "index", "impact", "depend", "next", "experiment"]:
+            for subcmd in [
+                "sync",
+                "query",
+                "assert",
+                "retract",
+                "verify",
+                "stats",
+                "index",
+                "impact",
+                "depend",
+                "next",
+                "experiment",
+            ]:
                 if f"cog {subcmd}" in cmd or f"cog experiment {subcmd}" in cmd:
                     key = subcmd if subcmd != "experiment" else f"exp_{subcmd}"
                     # More specific experiment subcommands
-                    if "experiment try" in cmd: key = "exp_try"
-                    elif "experiment start" in cmd: key = "exp_start"
-                    elif "experiment hypothesize" in cmd: key = "exp_hypothesize"
-                    elif "experiment evaluate" in cmd: key = "exp_evaluate"
-                    elif "experiment commit" in cmd: key = "exp_commit"
-                    elif "experiment discard" in cmd: key = "exp_discard"
+                    if "experiment try" in cmd:
+                        key = "exp_try"
+                    elif "experiment start" in cmd:
+                        key = "exp_start"
+                    elif "experiment hypothesize" in cmd:
+                        key = "exp_hypothesize"
+                    elif "experiment evaluate" in cmd:
+                        key = "exp_evaluate"
+                    elif "experiment commit" in cmd:
+                        key = "exp_commit"
+                    elif "experiment discard" in cmd:
+                        key = "exp_discard"
                     cog_summary[key] += 1
                     break
             else:
                 cog_summary["other"] += 1
 
         # Token totals from message table
-        token_rows = query_db(prog_db,
-            "SELECT data FROM message WHERE json_extract(data, '$.tokens') IS NOT NULL")
+        token_rows = query_db(
+            prog_db,
+            "SELECT data FROM message WHERE json_extract(data, '$.tokens') IS NOT NULL",
+        )
         total_in = total_out = 0
         for (data_str,) in token_rows:
             d = json.loads(data_str)
@@ -216,11 +278,13 @@ def analyze_trajectories(task_dir: Path) -> dict:
             total_out += t.get("output", 0)
 
         # Ordered tool calls for impact timing analysis
-        ordered_tools = query_db(prog_db,
+        ordered_tools = query_db(
+            prog_db,
             "SELECT json_extract(data, '$.tool'), "
             "COALESCE(json_extract(data, '$.state.input.command'), '') "
             "FROM part WHERE json_extract(data, '$.tool') IS NOT NULL "
-            "ORDER BY rowid")
+            "ORDER BY rowid",
+        )
         first_edit_idx = None
         has_impact_before_edit = False
         has_impact_after_edit = False
@@ -258,7 +322,6 @@ def analyze_trajectories(task_dir: Path) -> dict:
 
 import re
 
-
 META_FILE = "meta.json"
 
 
@@ -290,7 +353,9 @@ def _detect_max_epoch_from_data(all_iters: dict) -> int | None:
     """
     if not all_iters:
         return None
-    epoch_counts = [it["n_epochs"] for it in all_iters.values() if it.get("n_epochs", 0) > 0]
+    epoch_counts = [
+        it["n_epochs"] for it in all_iters.values() if it.get("n_epochs", 0) > 0
+    ]
     return max(epoch_counts) if epoch_counts else None
 
 
@@ -308,7 +373,7 @@ def _detect_max_epoch_from_config(exp_dir: Path) -> int | None:
                 name_match = re.search(r'experiment_name\s*=\s*"([^"]+)"', text)
                 if not name_match or name_match.group(1) != exp_name:
                     continue
-                epoch_match = re.search(r'max_epoch\s*=\s*(\d+)', text)
+                epoch_match = re.search(r"max_epoch\s*=\s*(\d+)", text)
                 if epoch_match:
                     return int(epoch_match.group(1))
             except Exception:
@@ -318,7 +383,9 @@ def _detect_max_epoch_from_config(exp_dir: Path) -> int | None:
 
     return None
 
+
 # ── SWE-CI metrics ──────────────────────────────────────────────────
+
 
 def compute_metrics(it: dict, max_epoch: int | None = None) -> dict:
     """Compute metrics matching official SWE-CI summarize.py metrics_func."""
@@ -378,6 +445,7 @@ def compute_metrics(it: dict, max_epoch: int | None = None) -> dict:
 
 # ── Single experiment analysis ──────────────────────────────────────
 
+
 def analyze_experiment(exp_dir: Path, max_epoch: int | None = None) -> dict:
     exp_dir = exp_dir.resolve()
     if not exp_dir.exists():
@@ -385,8 +453,11 @@ def analyze_experiment(exp_dir: Path, max_epoch: int | None = None) -> dict:
         sys.exit(1)
 
     tasks = sorted(
-        [(d.name, d) for d in exp_dir.iterdir()
-         if d.is_dir() and (d / "iteration.jsonl").exists()],
+        [
+            (d.name, d)
+            for d in exp_dir.iterdir()
+            if d.is_dir() and (d / "iteration.jsonl").exists()
+        ],
         key=lambda x: x[0],
     )
     if not tasks:
@@ -426,7 +497,7 @@ def analyze_experiment(exp_dir: Path, max_epoch: int | None = None) -> dict:
     if max_epoch is not None:
         print(f"  max_epoch={max_epoch} (detected from {detected_from})")
     else:
-        print(f"  max_epoch: unknown — using per-task epoch count", file=sys.stderr)
+        print("  max_epoch: unknown — using per-task epoch count", file=sys.stderr)
 
     # Phase 2: compute metrics and gather auxiliary data
     results = {}
@@ -435,12 +506,18 @@ def analyze_experiment(exp_dir: Path, max_epoch: int | None = None) -> dict:
         cog = analyze_cog(task_dir)
         traj = analyze_trajectories(task_dir)
         metrics = compute_metrics(it, max_epoch=max_epoch)
-        results[task_id] = {"iterations": it, "cog": cog, "trajectories": traj, "metrics": metrics}
+        results[task_id] = {
+            "iterations": it,
+            "cog": cog,
+            "trajectories": traj,
+            "metrics": metrics,
+        }
 
     return results
 
 
 # ── Formatters ───────────────────────────────────────────────────────
+
 
 def _short_task(task_id: str) -> str:
     """Truncate task ID to 8 chars for compact display."""
@@ -454,8 +531,14 @@ def print_summary_table(results: dict, title: str = ""):
         console.print(f"\n  {title}", style="bold")
         console.print("─" * 80)
 
-    table = Table(show_header=True, header_style="bold", show_lines=False,
-                  border_style="dim", padding=(0, 1), expand=False)
+    table = Table(
+        show_header=True,
+        header_style="bold",
+        show_lines=False,
+        border_style="dim",
+        padding=(0, 1),
+        expand=False,
+    )
     table.add_column("Task", style="cyan", no_wrap=True)
     table.add_column("EvoSc", justify="right", min_width=6)
     table.add_column("Res", justify="right", min_width=4)
@@ -477,10 +560,10 @@ def print_summary_table(results: dict, title: str = ""):
         table.add_row(
             _short_task(task_id),
             f"{m['EvoScore']:.3f}",
-            str(int(m['Resolved'])),
-            str(int(m['ZeroReg'])),
-            str(int(m['ZRR'])),
-            str(it['n_epochs']),
+            str(int(m["Resolved"])),
+            str(int(m["ZeroReg"])),
+            str(int(m["ZRR"])),
+            str(it["n_epochs"]),
             gap_trace,
             f"{it['total_in']:,}",
             f"{it['total_out']:,}",
@@ -493,10 +576,10 @@ def print_summary_table(results: dict, title: str = ""):
     if n > 0:
         table.add_row(
             f"AVERAGE ({n} tasks)",
-            f"{totals['EvoScore']/n:.3f}",
-            f"{totals['Resolved']/n:.2f}",
-            f"{totals['ZeroReg']/n:.2f}",
-            f"{totals['ZRR']/n:.2f}",
+            f"{totals['EvoScore'] / n:.3f}",
+            f"{totals['Resolved'] / n:.2f}",
+            f"{totals['ZeroReg'] / n:.2f}",
+            f"{totals['ZRR'] / n:.2f}",
             "",
             "",
             f"{totals['in']:,.0f}",
@@ -514,9 +597,9 @@ def print_cog_detail(results: dict):
         print("\n  No cog model data found.")
         return
 
-    print(f"\n{'─'*80}")
+    print(f"\n{'─' * 80}")
     print("  Cog Model Usage")
-    print(f"{'─'*80}")
+    print(f"{'─' * 80}")
 
     for task_id, r in results.items():
         cog = r["cog"]
@@ -524,7 +607,9 @@ def print_cog_detail(results: dict):
             continue
 
         print(f"\n  {_short_task(task_id)}")
-        print(f"    Entities: {cog['entities']}, Assertions: {cog['n_active']} active, {cog['n_retracted']} retracted")
+        print(
+            f"    Entities: {cog['entities']}, Assertions: {cog['n_active']} active, {cog['n_retracted']} retracted"
+        )
         if cog["kinds"]:
             print(f"    Kinds: {cog['kinds']}")
 
@@ -534,22 +619,28 @@ def print_cog_detail(results: dict):
             for ep_num in sorted(traj["epochs"]):
                 ep = traj["epochs"][ep_num]
                 if ep["cog_total"] > 0:
-                    print(f"    Epoch {ep_num}: {ep['cog_total']} cog calls — {ep['cog_summary']}")
+                    print(
+                        f"    Epoch {ep_num}: {ep['cog_total']} cog calls — {ep['cog_summary']}"
+                    )
 
         # Growth across snapshots
         if cog["growth"]:
             g = cog["growth"]
-            print(f"    Growth: {g[0]['entities']}→{g[-1]['entities']} entities, "
-                  f"{g[0]['active']}→{g[-1]['active']} assertions "
-                  f"across {len(g)} snapshots")
+            print(
+                f"    Growth: {g[0]['entities']}→{g[-1]['entities']} entities, "
+                f"{g[0]['active']}→{g[-1]['active']} assertions "
+                f"across {len(g)} snapshots"
+            )
 
         # Assertion details (truncated claims)
         if cog["assertions"]:
             active = [a for a in cog["assertions"] if a["status"] == "active"]
             if active:
-                print(f"    Active assertions:")
+                print("    Active assertions:")
                 for a in active[:8]:
-                    claim = a["claim"][:90] + "…" if len(a["claim"]) > 90 else a["claim"]
+                    claim = (
+                        a["claim"][:90] + "…" if len(a["claim"]) > 90 else a["claim"]
+                    )
                     print(f"      [{a['kind']}] {claim}")
                 if len(active) > 8:
                     print(f"      ... and {len(active) - 8} more")
@@ -561,15 +652,18 @@ def print_regressions(results: dict):
     for r in results.values():
         for reg in r["iterations"].get("regressions", []):
             if not has_reg:
-                print(f"\n{'─'*80}")
+                print(f"\n{'─' * 80}")
                 print("  Regressions")
-                print(f"{'─'*80}")
+                print(f"{'─' * 80}")
                 has_reg = True
-            print(f"    Task {_short_task(r.get('_task_id', '?'))}: Epoch {reg['epoch']}, "
-                  f"passed {reg['prev']}→{reg['cur']}")
+            print(
+                f"    Task {_short_task(r.get('_task_id', '?'))}: Epoch {reg['epoch']}, "
+                f"passed {reg['prev']}→{reg['cur']}"
+            )
 
 
 # ── Cog Quality Analysis ─────────────────────────────────────────────
+
 
 def analyze_quality(results: dict) -> dict:
     """Analyze cog usage quality signals per task (§5.5 of SWE-CI-GUIDE.md)."""
@@ -650,17 +744,28 @@ def analyze_quality(results: dict) -> dict:
                     q["impact_after"] += 1
 
             q["command_diversity"] = len(all_subcmds)
-            q["command_detail"] = ", ".join(sorted(all_subcmds)) if all_subcmds else "none"
+            q["command_detail"] = (
+                ", ".join(sorted(all_subcmds)) if all_subcmds else "none"
+            )
 
             # Build impact detail string
             total_impact = q["impact_before"] + q["impact_after"]
             if total_impact > 0:
-                before_only = sum(1 for ep in traj["epochs"].values()
-                                  if ep.get("impact_timing") == "before")
-                after_only = sum(1 for ep in traj["epochs"].values()
-                                 if ep.get("impact_timing") == "after")
-                mixed = sum(1 for ep in traj["epochs"].values()
-                            if ep.get("impact_timing") == "mixed")
+                before_only = sum(
+                    1
+                    for ep in traj["epochs"].values()
+                    if ep.get("impact_timing") == "before"
+                )
+                after_only = sum(
+                    1
+                    for ep in traj["epochs"].values()
+                    if ep.get("impact_timing") == "after"
+                )
+                mixed = sum(
+                    1
+                    for ep in traj["epochs"].values()
+                    if ep.get("impact_timing") == "mixed"
+                )
                 parts = []
                 if before_only:
                     parts.append(f"{before_only} before")
@@ -676,11 +781,15 @@ def analyze_quality(results: dict) -> dict:
             if q["persistence_rate"] >= 0.8:
                 q["good_signals"].append("cog DB persists across iterations")
             if q["assertion_growth"]:
-                q["good_signals"].append(f"assertions grow ({q['assertion_growth_delta']:+d})")
+                q["good_signals"].append(
+                    f"assertions grow ({q['assertion_growth_delta']:+d})"
+                )
             if q["kind_quality"] >= 0.3:
                 q["good_signals"].append(f"high-value kinds {q['kind_quality']:.0%}")
             if q["command_diversity"] >= 4:
-                q["good_signals"].append(f"diverse usage ({q['command_diversity']} cmds)")
+                q["good_signals"].append(
+                    f"diverse usage ({q['command_diversity']} cmds)"
+                )
             if q["impact_before"] > q["impact_after"]:
                 q["good_signals"].append("impact used before edits")
             if q["next_used"] > 0:
@@ -703,6 +812,7 @@ def analyze_quality(results: dict) -> dict:
         quality[task_id] = q
     return quality
 
+
 def analyze_subcommand_distribution(results: dict) -> dict:
     """Aggregate cog subcommand calls across all tasks and epochs.
 
@@ -724,7 +834,10 @@ def analyze_subcommand_distribution(results: dict) -> dict:
     # Sort by count descending
     sorted_cmds = sorted(totals.items(), key=lambda x: x[1], reverse=True)
     distribution = {
-        subcmd: {"count": count, "pct": round(count / grand_total * 100, 1) if grand_total > 0 else 0.0}
+        subcmd: {
+            "count": count,
+            "pct": round(count / grand_total * 100, 1) if grand_total > 0 else 0.0,
+        }
         for subcmd, count in sorted_cmds
     }
 
@@ -761,11 +874,20 @@ def print_subcommand_distribution(results: dict):
         console.print("\n  No cog CLI calls found.")
         return
 
-    console.print(f"\n  Cog Subcommand Distribution ({dist['grand_total']} total calls)", style="bold")
+    console.print(
+        f"\n  Cog Subcommand Distribution ({dist['grand_total']} total calls)",
+        style="bold",
+    )
     console.print("─" * 80)
 
-    table = Table(show_header=True, header_style="bold", show_lines=False,
-                  border_style="dim", padding=(0, 1), expand=False)
+    table = Table(
+        show_header=True,
+        header_style="bold",
+        show_lines=False,
+        border_style="dim",
+        padding=(0, 1),
+        expand=False,
+    )
     table.add_column("Subcommand", style="cyan", min_width=20)
     table.add_column("Calls", justify="right", min_width=7)
     table.add_column("%", justify="right", min_width=6)
@@ -783,6 +905,7 @@ def print_subcommand_distribution(results: dict):
     console.print(table)
     return dist
 
+
 def print_quality_report(results: dict):
     """Print cog quality metrics table and signal analysis."""
     quality = analyze_quality(results)
@@ -793,11 +916,17 @@ def print_quality_report(results: dict):
         console.print("\n  No cog data — skipping quality analysis.")
         return
 
-    console.print(f"\n  Cog Quality Metrics", style="bold")
+    console.print("\n  Cog Quality Metrics", style="bold")
     console.print("─" * 80)
 
-    table = Table(show_header=True, header_style="bold", show_lines=False,
-                  border_style="dim", padding=(0, 1), expand=False)
+    table = Table(
+        show_header=True,
+        header_style="bold",
+        show_lines=False,
+        border_style="dim",
+        padding=(0, 1),
+        expand=False,
+    )
     table.add_column("Task", style="cyan", no_wrap=True)
     table.add_column("Persist", justify="center", min_width=7)
     table.add_column("Growth", justify="center", min_width=8)
@@ -809,9 +938,18 @@ def print_quality_report(results: dict):
 
     for tid, q in cog_tasks.items():
         persist_str = f"{q['persistence_rate']:.0%}" if q["persistence_detail"] else "—"
-        growth_str = f"+{q['assertion_growth_delta']}" if q["assertion_growth"] else (
-            str(q["assertion_growth_delta"]) if q["assertion_growth_delta"] != 0 else "0")
-        kind_str = f"{q['kind_quality']:.0%}" if q["kind_detail"] != "no assertions" else "—"
+        growth_str = (
+            f"+{q['assertion_growth_delta']}"
+            if q["assertion_growth"]
+            else (
+                str(q["assertion_growth_delta"])
+                if q["assertion_growth_delta"] != 0
+                else "0"
+            )
+        )
+        kind_str = (
+            f"{q['kind_quality']:.0%}" if q["kind_detail"] != "no assertions" else "—"
+        )
         div_str = str(q["command_diversity"])
         retract_str = "✓" if q["has_retract"] else "—"
         next_str = str(q["next_used"]) if q["next_used"] > 0 else "—"
@@ -839,21 +977,23 @@ def print_quality_report(results: dict):
             all_bad.append((_short_task(tid), s))
 
     if all_good:
-        console.print(f"\n  Good signals:", style="bold green")
+        console.print("\n  Good signals:", style="bold green")
         for task, signal in all_good:
             console.print(f"    [green]✓[/green] {task}: {signal}")
 
     if all_bad:
-        console.print(f"\n  Bad signals:", style="bold yellow")
+        console.print("\n  Bad signals:", style="bold yellow")
         for task, signal in all_bad:
             console.print(f"    [yellow]⚠[/yellow] {task}: {signal}")
 
     if not all_bad:
-        console.print(f"\n  [green]No bad signals detected.[/green]")
+        console.print("\n  [green]No bad signals detected.[/green]")
 
     return quality
 
+
 # ── A/B Comparison ──────────────────────────────────────────────────
+
 
 def print_comparison(baseline: dict, cog: dict, baseline_dir: str, cog_dir: str):
     """Print A/B comparison table."""
@@ -862,13 +1002,15 @@ def print_comparison(baseline: dict, cog: dict, baseline_dir: str, cog_dir: str)
     baseline_only = sorted(set(baseline) - set(cog))
     cog_only = sorted(set(cog) - set(baseline))
 
-    console.print(f"\n  A/B COMPARISON", style="bold")
+    console.print("\n  A/B COMPARISON", style="bold")
     console.print(f"  Baseline: {baseline_dir}")
     console.print(f"  Cog:      {cog_dir}")
     console.print("═" * 90)
 
     if baseline_only:
-        console.print(f"\n  Baseline-only tasks: {[_short_task(t) for t in baseline_only]}")
+        console.print(
+            f"\n  Baseline-only tasks: {[_short_task(t) for t in baseline_only]}"
+        )
     if cog_only:
         console.print(f"\n  Cog-only tasks: {[_short_task(t) for t in cog_only]}")
 
@@ -876,8 +1018,14 @@ def print_comparison(baseline: dict, cog: dict, baseline_dir: str, cog_dir: str)
         console.print("\n  No common tasks to compare.")
         return
 
-    table = Table(show_header=True, header_style="bold", show_lines=False,
-                  border_style="dim", padding=(0, 1), expand=False)
+    table = Table(
+        show_header=True,
+        header_style="bold",
+        show_lines=False,
+        border_style="dim",
+        padding=(0, 1),
+        expand=False,
+    )
     table.add_column("Task", style="cyan", no_wrap=True)
     table.add_column("Base EvoS", justify="right", min_width=7)
     table.add_column("Cog EvoS", justify="right", min_width=7)
@@ -912,20 +1060,28 @@ def print_comparison(baseline: dict, cog: dict, baseline_dir: str, cog_dir: str)
 
         table.add_row(
             _short_task(tid),
-            f"{bm['EvoScore']:.3f}", f"{cm['EvoScore']:.3f}",
-            str(int(bm['Resolved'])), str(int(cm['Resolved'])),
-            str(int(bm['ZeroReg'])), str(int(cm['ZeroReg'])),
-            str(int(bm['ZRR'])), str(int(cm['ZRR'])),
+            f"{bm['EvoScore']:.3f}",
+            f"{cm['EvoScore']:.3f}",
+            str(int(bm["Resolved"])),
+            str(int(cm["Resolved"])),
+            str(int(bm["ZeroReg"])),
+            str(int(cm["ZeroReg"])),
+            str(int(bm["ZRR"])),
+            str(int(cm["ZRR"])),
             delta_str,
         )
 
     n = len(common_tasks)
     table.add_row(
         f"AVERAGE ({n})",
-        f"{b_totals['EvoScore']/n:.3f}", f"{c_totals['EvoScore']/n:.3f}",
-        f"{b_totals['Resolved']/n:.2f}", f"{c_totals['Resolved']/n:.2f}",
-        f"{b_totals['ZeroReg']/n:.2f}", f"{c_totals['ZeroReg']/n:.2f}",
-        f"{b_totals['ZRR']/n:.2f}", f"{c_totals['ZRR']/n:.2f}",
+        f"{b_totals['EvoScore'] / n:.3f}",
+        f"{c_totals['EvoScore'] / n:.3f}",
+        f"{b_totals['Resolved'] / n:.2f}",
+        f"{c_totals['Resolved'] / n:.2f}",
+        f"{b_totals['ZeroReg'] / n:.2f}",
+        f"{c_totals['ZeroReg'] / n:.2f}",
+        f"{b_totals['ZRR'] / n:.2f}",
+        f"{c_totals['ZRR'] / n:.2f}",
         "",
         style="bold",
     )
@@ -933,9 +1089,11 @@ def print_comparison(baseline: dict, cog: dict, baseline_dir: str, cog_dir: str)
     console.print(table)
 
     # Verbose: gap traces side by side
-    console.print(f"\n  Gap Trace Comparison:", style="bold")
+    console.print("\n  Gap Trace Comparison:", style="bold")
     for tid in common_tasks:
-        b_trace = "→".join(str(g) for g in baseline[tid]["iterations"].get("gap_trace", []))
+        b_trace = "→".join(
+            str(g) for g in baseline[tid]["iterations"].get("gap_trace", [])
+        )
         c_trace = "→".join(str(g) for g in cog[tid]["iterations"].get("gap_trace", []))
         b_epochs = baseline[tid]["iterations"]["n_epochs"]
         c_epochs = cog[tid]["iterations"]["n_epochs"]
@@ -944,29 +1102,47 @@ def print_comparison(baseline: dict, cog: dict, baseline_dir: str, cog_dir: str)
         console.print(f"      cog      ({c_epochs}ep): {c_trace}")
 
     # Cog-specific metrics
-    console.print(f"\n  Cog-specific (treatment only):", style="bold")
-    cog_tasks_with_cog = [(tid, cog[tid]) for tid in common_tasks if cog[tid]["cog"].get("has_cog")]
+    console.print("\n  Cog-specific (treatment only):", style="bold")
+    cog_tasks_with_cog = [
+        (tid, cog[tid]) for tid in common_tasks if cog[tid]["cog"].get("has_cog")
+    ]
     if cog_tasks_with_cog:
         for tid, r in cog_tasks_with_cog:
             c = r["cog"]
             traj = r["trajectories"]
-            total_cog_calls = sum(ep["cog_total"] for ep in traj.get("epochs", {}).values()) if traj.get("has_traj") else 0
-            console.print(f"    {_short_task(tid)}: {c['entities']} ents, {c['n_active']} asserts, {total_cog_calls} cog CLI calls")
+            total_cog_calls = (
+                sum(ep["cog_total"] for ep in traj.get("epochs", {}).values())
+                if traj.get("has_traj")
+                else 0
+            )
+            console.print(
+                f"    {_short_task(tid)}: {c['entities']} ents, {c['n_active']} asserts, {total_cog_calls} cog CLI calls"
+            )
     else:
         console.print("    No cog data found in treatment group.")
 
 
 # ── Main ─────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate SWE-CI experiment results")
     parser.add_argument("dirs", nargs="+", type=Path, help="Experiment directory(s)")
-    parser.add_argument("--compare", action="store_true",
-                        help="A/B comparison: first dir=baseline, second dir=cog")
-    parser.add_argument("--max-epoch", type=int, default=None,
-                        help="Override max_epoch (auto-detected: meta.json → max(n_epochs) → config.toml)")
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="A/B comparison: first dir=baseline, second dir=cog",
+    )
+    parser.add_argument(
+        "--max-epoch",
+        type=int,
+        default=None,
+        help="Override max_epoch (auto-detected: meta.json → max(n_epochs) → config.toml)",
+    )
     parser.add_argument("--json", action="store_true", help="Also output JSON report")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show per-task detail")
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show per-task detail"
+    )
     args = parser.parse_args()
 
     if args.compare and len(args.dirs) != 2:
