@@ -1,0 +1,24 @@
+internal_name: claude-sonnet-4-6
+provider: anthropic
+pricing:
+  input: 3
+  output: 15
+  cache_read: 0.30
+  cache_write: 3.75
+aliases:
+  - sonnet-4.6
+provider_slugs:
+  openrouter: anthropic/claude-sonnet-4.6
+  bedrock: us.anthropic.claude-sonnet-4-6
+  foundry: claude-sonnet-4-6
+
+agent_specific:
+  mini_swe:
+    model_name: anthropic/claude-sonnet-4.6
+    model_class: openrouter
+
+  codex:
+    thinking: medium
+
+  opencode:
+    provider_name: anthropic

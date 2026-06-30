@@ -1,0 +1,18 @@
+category: diagnostics
+checkpoints:
+  checkpoint_1:
+    order: 1
+    version: 1
+  checkpoint_2:
+    order: 2
+    version: 1
+description: Simple inventory CLI used to debug agent runner behaviour.
+difficulty: Easy
+entry_file: inventory_cli.sh
+name: inventory_cli_debug_problem
+tags:
+- debug
+- cli
+- smoke
+timeout: 10
+version: 1

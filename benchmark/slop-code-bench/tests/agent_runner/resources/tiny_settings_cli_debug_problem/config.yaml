@@ -1,0 +1,19 @@
+category: diagnostics
+checkpoints:
+  checkpoint_1:
+    version: 1
+    order: 1
+    state: Core Tests
+description: Minimal settings CLI used to debug agent runner behaviour.
+difficulty: Easy
+entry_file: tiny_settings_cli.py
+name: tiny_settings_cli_debug_problem
+static_assets:
+  assets_bundle:
+    path: checkpoint_1/assets
+tags:
+- debug
+- cli
+- smoke
+timeout: 10
+version: 1
