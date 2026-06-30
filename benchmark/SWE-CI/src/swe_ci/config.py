@@ -67,6 +67,27 @@ def redact_pprint(x, keys=("api_key", "hf_token"), repl="***") -> None:
     print(f"="*65, flush=True)
 
 
+def apply_env_overrides(cfg):
+    """Fill empty LLM fields from environment. Explicit TOML/CLI values win.
+
+    Precedence: explicit --api_key / TOML value  >  env var  >  empty.
+    ponytail: env-fallback only — keeps secrets out of committed TOML.
+    """
+    fallbacks = {
+        "api_key":    ("SWE_CI_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"),
+        "base_url":   ("SWE_CI_BASE_URL",),
+        "model_name": ("SWE_CI_MODEL_NAME",),
+    }
+    for field, envs in fallbacks.items():
+        if getattr(cfg, field, "") == "":
+            for name in envs:
+                val = os.environ.get(name, "")
+                if val:
+                    setattr(cfg, field, val)
+                    break
+    return cfg
+
+
 def load_config() -> SimpleNamespace:
 
     pre_parser = argparse.ArgumentParser(add_help=False)
@@ -133,6 +154,7 @@ def load_config() -> SimpleNamespace:
         print(f"Unsupported agent: {cfg.agent_name}", flush=True)
         sys.exit(1)
 
+    cfg = apply_env_overrides(cfg)
     return json.loads(
         json.dumps(cfg.as_dict()), 
         object_hook=lambda d: SimpleNamespace(**d)

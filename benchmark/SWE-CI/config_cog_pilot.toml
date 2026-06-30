@@ -12,8 +12,8 @@ hf_repo_id      = "skylenage-ai/SWE-CI"
 agent_name      = "opencode"
 cog             = true                          # Enables cog prompt variant + cog Dockerfile
 
-# ✏️ LLM API credentials
-api_key    = "sk-565880aabf2d44359ac4c572b3fea8fa"
+# ✏️ LLM API credentials — set via SWE_CI_API_KEY env var (or --api_key)
+api_key    = ""
 base_url   = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 

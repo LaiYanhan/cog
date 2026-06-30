@@ -345,8 +345,8 @@ hf_token = "none"
 hf_repo_id = "skylenage-ai/SWE-CI"
 save_root_dir = "."
 
-# ✏️ LLM API credentials — fill in before running
-api_key = "sk-ddcc430a74da4867a9bbd05f1af92fee"
+# ✏️ LLM API credentials — export SWE_CI_API_KEY (or DEEPSEEK_API_KEY) instead of hardcoding
+api_key = ""
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
@@ -428,8 +428,8 @@ hf_token = "none"
 hf_repo_id = "skylenage-ai/SWE-CI"
 save_root_dir = "."
 
-# ✏️ LLM API credentials — fill in before running
-api_key = "sk-ddcc430a74da4867a9bbd05f1af92fee"
+# ✏️ LLM API credentials — export SWE_CI_API_KEY (or DEEPSEEK_API_KEY) instead of hardcoding
+api_key = ""
 base_url = "https://api.deepseek.com"
 model_name = "deepseek-chat"
 
