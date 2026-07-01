@@ -851,8 +851,9 @@ backup  | cog      | 4/4        | 0.80→0.85       | $5.40 | 345K   | 34       
 1. **不复制整套 run config / agent config**。原 §5.2 方案 A 建议 `save_template` 用 `${cog.enabled:0}` 区分目录；实际实现改为在 loader 里动态给模板插入 `_cog` 标记。baseline 与 cog 用**同一份 YAML**，通过 shell 脚本里的 `cog=true`/`cog=false` CLI 覆盖切换，减少文件重复。
 2. **CLI 覆盖值是字符串**。`slop-code run cog=true` 里的 `true` 被 OmegaConf 当作字符串 `"true"`，因此 `loader.py` 加了一个 `_coerce_cog_config` 函数，同时处理 `bool` / `str`（`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`） / `dict` 三种形态。
 3. **默认二进制路径**。`CogConfig.binary_path` 默认 `../../target/release/cog`（相对 benchmark 根目录）。在 loader 里会按 `Path.cwd()` 解析为绝对路径，并检查二进制存在；不存在时抛出 `FileNotFoundError`。
-4. **无需额外 WAL checkpoint 调用**。capture 钩子在容器仍存活时（`session.finish_checkpoint` 之后）直接 `shutil.copytree` 整个 `.cog/` 目录，包含 `cog.db` / `-wal` / `-shm` / `usage.jsonl` / `experiments/` / `workflow_state.json`。
-5. **snapshot 仍可能包含 `.cog/`**。当前没有把它加入 `ignore_globs`；如果需要避免污染提交快照，后续再补（不影响 `cog_state/` 单独拷贝）。
+4. **prompt 被单引号包裹后注入**（workaround）：`claude_code/agent.py` 在把 CLI 参数列表拼成 shell 命令时没有用 `shlex.quote`（`" ".join(cli_args)`），多行 prompt 里的换行/空格会被 `/bin/sh -c` 当成命令分隔，导致 `--append-system-prompt` 参数丢失并出现 `cog: not found` / `A: not found` 等 shell 报错。为了不改 benchmark 的 agent 代码，`loader.py` 在注入 `append_system_prompt` 时先用单引号把整段 prompt 包起来（内部单引号做 ` '\''` 转义）。这样 agent 的 `" ".join` 会产生 `--append-system-prompt '...完整 prompt...'`，shell 会把它作为一个参数传给 Claude，prompt 保持完整的多行文本和空格。`shlex.split` 验证可完整还原原始 prompt。
+5. **无需额外 WAL checkpoint 调用**。capture 钩子在容器仍存活时（`session.finish_checkpoint` 之后）直接 `shutil.copytree` 整个 `.cog/` 目录，包含 `cog.db` / `-wal` / `-shm` / `usage.jsonl` / `experiments/` / `workflow_state.json`。
+6. **snapshot 仍可能包含 `.cog/`**。当前没有把它加入 `ignore_globs`；如果需要避免污染提交快照，后续再补（不影响 `cog_state/` 单独拷贝）。
 
 ### 9.3 验证结果
 

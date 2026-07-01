@@ -62,6 +62,11 @@ especially as the specification evolves across checkpoints.
 when it helps; do not let it replace actually reading and testing the code."""
 
 
+def _quote_for_shell(value: str) -> str:
+    """Wrap a string in single quotes so it survives " ".join() in the agent."""
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
 def _coerce_cog_config(value: Any) -> CogConfig:
     """Parse the `cog` field from YAML or CLI override into a CogConfig."""
     if isinstance(value, bool):
@@ -94,12 +99,16 @@ def _apply_cog_integration(
             "Run 'cargo build --release' in the cog repository."
         )
 
-    # Inject/append the system prompt into the agent config
+    # Inject/append the system prompt into the agent config. We wrap it in
+    # single quotes because claude_code/agent.py joins CLI args with spaces
+    # without shlex quoting; the quotes make the shell treat the whole prompt
+    # as a single argument to --append-system-prompt.
     existing = agent_data.get("append_system_prompt", "")
+    quoted_prompt = _quote_for_shell(COG_SYSTEM_PROMPT)
     if existing:
-        agent_data["append_system_prompt"] = f"{existing}\n\n{COG_SYSTEM_PROMPT}"
+        agent_data["append_system_prompt"] = f"{existing}\n\n{quoted_prompt}"
     else:
-        agent_data["append_system_prompt"] = COG_SYSTEM_PROMPT
+        agent_data["append_system_prompt"] = quoted_prompt
 
     # Bind-mount the prebuilt binary into the container
     env_data.setdefault("docker", {})
