@@ -65,6 +65,33 @@ class ThinkingConfig(BaseModel):
         return self
 
 
+class CogConfig(BaseModel):
+    """Cognitive model (cog) CLI integration.
+
+    When enabled, the runner automatically mounts the prebuilt cog binary into
+    the container and injects a system prompt that teaches the agent to use it.
+    The `cog: true` shorthand in YAML is also accepted.
+
+    Attributes:
+        enabled: Whether to enable cog instrumentation for this run.
+        binary_path: Host path to the prebuilt cog binary. Relative paths are
+            resolved against the current working directory (benchmark root).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    binary_path: str = "../../target/release/cog"
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_bool(cls, value: Any) -> Any:
+        """Allow `cog: true` shorthand in YAML."""
+        if isinstance(value, bool):
+            return {"enabled": value}
+        return value
+
+
 class RunConfig(BaseModel):
     """Unified run configuration for the agent runner.
 
@@ -86,6 +113,7 @@ class RunConfig(BaseModel):
         save_template: Output path template with OmegaConf interpolation support
         one_shot: Whether to run the problem as a single checkpoint with a
             combined specification.
+        cog: Cog integration settings.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -111,6 +139,8 @@ class RunConfig(BaseModel):
     problems: list[str] = Field(default_factory=list)
 
     one_shot: OneShotConfig = Field(default_factory=OneShotConfig)
+
+    cog: CogConfig = Field(default_factory=CogConfig)
 
     # Output path configuration with interpolation support
     # Available variables: ${model.name}, ${model.provider}, ${agent.type},
@@ -155,6 +185,7 @@ class ResolvedRunConfig(BaseModel):
         save_template: Resolved output path template (interpolations applied)
         output_path: Full output path (save_dir/save_template)
         one_shot: One-shot execution configuration.
+        cog: Resolved cog integration settings.
     """
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
@@ -174,3 +205,4 @@ class ResolvedRunConfig(BaseModel):
     save_template: str
     output_path: str
     one_shot: OneShotConfig = Field(default_factory=OneShotConfig)
+    cog: CogConfig = Field(default_factory=CogConfig)

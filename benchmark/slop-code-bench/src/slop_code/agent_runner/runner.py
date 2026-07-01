@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import queue
 import threading
 import time
@@ -345,6 +346,42 @@ def evaluate_agent_snapshot(
     return report, quality_report
 
 
+def _capture_cog_state(working_dir: Path, save_dir: Path) -> None:
+    """Copy .cog/ from the agent workspace to the checkpoint output, if present.
+
+    When the agent used `cog` inside the container, its cognitive model
+    (cog.db, usage.jsonl, experiments) lives at <working_dir>/.cog. This gives
+    a stable aggregated location (checkpoint_N/cog_state) for offline analysis.
+    No-op when .cog/ is absent (baseline runs without cog).
+    """
+    cog_dir = working_dir / ".cog"
+    if not cog_dir.exists():
+        return
+    dest = save_dir / "cog_state"
+    try:
+        shutil.copytree(cog_dir, dest, dirs_exist_ok=True)
+        file_count = sum(1 for _ in dest.rglob("*") if _.is_file())
+        (dest / "capture_info.json").write_text(
+            json.dumps(
+                {
+                    "captured_at": datetime.now().isoformat(),
+                    "source": str(cog_dir),
+                    "destination": str(dest),
+                    "file_count": file_count,
+                },
+                indent=2,
+            )
+        )
+        logger.info(
+            "Captured cog state",
+            checkpoint_dir=str(save_dir),
+            src=str(cog_dir),
+            file_count=file_count,
+        )
+    except OSError as exc:
+        logger.warning("Failed to capture cog state", error=str(exc))
+
+
 def _run_inference(
     checkpoint_name: str,
     session: Session,
@@ -395,6 +432,7 @@ def _run_inference(
             checkpoint=checkpoint_name,
             changes=repr(diff),
         )
+        _capture_cog_state(session.working_dir, save_dir)
 
     return snapshot_dir, result, diff
 

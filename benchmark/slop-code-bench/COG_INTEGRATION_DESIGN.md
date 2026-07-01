@@ -1,7 +1,7 @@
 # Cog × SCBench 集成设计文档
 
-> 状态：**设计稿（未实现）**。本文档记录分析结论与实施方案，供后续编码时直接参考，
-> 避免重复逆向分析。所有结论均基于对源码、配置、实际产物的直接阅读，标注了证据出处。
+> 状态：**已实施（见 §9 实施回填）**。本文档原设计稿已落地，当前代码可直接跑 baseline/cog 对照实验。
+> 后续修改以源码为准，并及时回填到 §9。
 >
 > 范围：把 `cog`（认知模型 CLI）接入 `slop-code-bench`（SCBench）benchmark，构成
 > "有 cog / 无 cog"的对照实验，并完整记录轨迹与统计数据。
@@ -829,4 +829,52 @@ backup  | cog      | 4/4        | 0.80→0.85       | $5.40 | 345K   | 34       
 
 ---
 
-> **文档结束。** 后续实现时，按 §7 阶段顺序推进；每步的接入点、证据出处、注意事项均已在对应章节标注。遇到与本文件不符的实现细节，以源码为准并回填本文档。
+## 9. 实施回填（已落地代码对照）
+
+> 本节记录实际实现与 §5/§7 设计的差异，避免文档与源码脱节。
+> 状态：**已实施并验证通过**。
+
+### 9.1 修改文件清单
+
+| 文件 | 改动性质 | 内容 |
+|------|---------|------|
+| `src/slop_code/entrypoints/config/run_config.py` | code | 新增 `CogConfig`；`RunConfig` / `ResolvedRunConfig` 新增 `cog: CogConfig` 字段；支持 `cog: true` 简写 |
+| `src/slop_code/entrypoints/config/loader.py` | code | 解析 `cog` 配置；启用时注入 `append_system_prompt`、挂载 `cog` 二进制到 `/usr/local/bin/cog`、给 `save_template` 加 `_cog` 标记 |
+| `src/slop_code/agent_runner/runner.py` | code | checkpoint 后钩子 `_capture_cog_state` 拷贝 `workspace/.cog` → `checkpoint_N/cog_state/`，并写入 `capture_info.json` |
+| `deepseek_run_*.yaml`（5 个） | cfg | 每个文件加一行 `cog: true` |
+| `run_baseline.sh` / `run_cog.sh` | script | 硬编码 `cog=false` / `cog=true` CLI 覆盖，可选参数 `[CONFIG]` 默认 `deepseek_run_smoke.yaml` |
+| `configs/agents/claude_code_deepseek_cog.yaml` | deleted | 已删除，避免重复配置 |
+| `deepseek_run_smoke_cog.yaml` | deleted | 已删除，避免重复配置 |
+
+### 9.2 与设计的差异
+
+1. **不复制整套 run config / agent config**。原 §5.2 方案 A 建议 `save_template` 用 `${cog.enabled:0}` 区分目录；实际实现改为在 loader 里动态给模板插入 `_cog` 标记。baseline 与 cog 用**同一份 YAML**，通过 shell 脚本里的 `cog=true`/`cog=false` CLI 覆盖切换，减少文件重复。
+2. **CLI 覆盖值是字符串**。`slop-code run cog=true` 里的 `true` 被 OmegaConf 当作字符串 `"true"`，因此 `loader.py` 加了一个 `_coerce_cog_config` 函数，同时处理 `bool` / `str`（`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`） / `dict` 三种形态。
+3. **默认二进制路径**。`CogConfig.binary_path` 默认 `../../target/release/cog`（相对 benchmark 根目录）。在 loader 里会按 `Path.cwd()` 解析为绝对路径，并检查二进制存在；不存在时抛出 `FileNotFoundError`。
+4. **无需额外 WAL checkpoint 调用**。capture 钩子在容器仍存活时（`session.finish_checkpoint` 之后）直接 `shutil.copytree` 整个 `.cog/` 目录，包含 `cog.db` / `-wal` / `-shm` / `usage.jsonl` / `experiments/` / `workflow_state.json`。
+5. **snapshot 仍可能包含 `.cog/`**。当前没有把它加入 `ignore_globs`；如果需要避免污染提交快照，后续再补（不影响 `cog_state/` 单独拷贝）。
+
+### 9.3 验证结果
+
+- `python -c "import ast; ..."`：所有改动的 Python 文件语法通过。
+- `uv run python` 加载 `deepseek_run_smoke.yaml`：
+  - `cog.enabled=True` → `agent.append_system_prompt` 被注入、`environment.docker.extra_mounts` 含 `/usr/local/bin/cog`、`save_template` 含 `_cog`。
+  - `cog=false`（CLI 覆盖） → 不注入、不挂载、目录无 `_cog` 标记。
+
+### 9.4 如何跑对照实验
+
+```bash
+# 在 benchmark/slop-code-bench/ 目录下
+./run_baseline.sh [deepseek_run_smoke.yaml]   # 无 cog
+./run_cog.sh [deepseek_run_smoke.yaml]        # 启用 cog
+
+# 或直接传 CLI 覆盖（效果同上）
+uv run slop-code run --config deepseek_run_smoke.yaml cog=false
+uv run slop-code run --config deepseek_run_smoke.yaml cog=true
+```
+
+产物目录会自动带 `_cog` 或 `_nocog` 区分（若原模板含 `${now:...}`，则变成 `_cog_${now:...}`）。
+
+---
+
+> **文档结束。** 设计部分保留原有分析；实施细节以 §9 和源码为准。

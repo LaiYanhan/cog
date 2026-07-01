@@ -1,5 +1,6 @@
 agent: ./configs/agents/claude_code_deepseek.yaml
 environment: docker-python3.12-uv
+cog: true
 prompt: just-solve
 
 model:

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from slop_code.common import CONFIG_FILENAME
 from slop_code.entrypoints.config.resolvers import register_resolvers
+from slop_code.entrypoints.config.run_config import CogConfig
 from slop_code.entrypoints.config.run_config import ModelConfig
 from slop_code.entrypoints.config.run_config import OneShotConfig
 from slop_code.entrypoints.config.run_config import ResolvedRunConfig
@@ -23,6 +24,98 @@ from slop_code.logging import get_logger
 
 logger = get_logger(__name__)
 
+
+COG_SYSTEM_PROMPT = """## Cognitive Model Tool: `cog`
+
+A persistent cognitive model of the codebase is available via the `cog` CLI
+(installed at /usr/local/bin/cog, data in .cog/cog.db). It records what you
+know about the code — contracts, invariants, fragilities, design intent — so
+you do not have to re-derive that understanding from scratch each time,
+especially as the specification evolves across checkpoints.
+
+### When and how to use it
+
+- **First checkpoint**: run `cog sync --init` in the workspace root to build
+  the structural model, then `cog index` to survey what exists.
+- **Before writing or changing code**: `cog query <entity>` to recall what is
+  already known, and `cog impact <entity>` to check blast radius.
+- **When you learn something non-obvious** (a contract, a constraint, a risk,
+  a design decision): record it so a future checkpoint benefits:
+  `cog assert <entity> --kind contract|invariant|fragility|intent --claim "<one sentence>" --grounds "code:<entity>"`
+- **When a prior assumption is invalidated** by a spec change or a failed
+  attempt: `cog retract <id> --reason "<why>"` (it cascades to dependents).
+- **Unsure what to do next**: `cog next` — it reads the workflow state and
+  suggests the next action.
+
+### Guidelines
+
+- Record the WHY (promises, risks, intent, corrections), not what the code
+  obviously does. Restating obvious behaviour wastes tokens.
+- Keep assertions to one crisp sentence each. Use `--grounds code:<entity>`
+  to tie them to evidence.
+- Entity names are `::`-qualified (e.g. `backup_scheduler::parse_schedule`).
+  Uppercase last segment = Type, contains `::` = Function, else Module.
+- Run `cog sync` after meaningful code changes to refresh the model, then
+  `cog verify` to check consistency.
+
+`cog` is a tool to make your work across checkpoints more coherent. Use it
+when it helps; do not let it replace actually reading and testing the code."""
+
+
+def _coerce_cog_config(value: Any) -> CogConfig:
+    """Parse the `cog` field from YAML or CLI override into a CogConfig."""
+    if isinstance(value, bool):
+        return CogConfig(enabled=value)
+    if isinstance(value, str):
+        lowered = value.lower().strip()
+        if lowered in ("true", "1", "yes", "on"):
+            return CogConfig(enabled=True)
+        if lowered in ("false", "0", "no", "off"):
+            return CogConfig(enabled=False)
+    if isinstance(value, dict):
+        return CogConfig(**value)
+    return CogConfig()
+
+
+def _apply_cog_integration(
+    cog: CogConfig,
+    agent_data: dict[str, Any],
+    env_data: dict[str, Any],
+    save_template_raw: str,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Mount the cog binary and inject the cog system prompt when enabled."""
+    binary_path = Path(cog.binary_path)
+    if not binary_path.is_absolute():
+        binary_path = Path.cwd() / binary_path
+    binary_path = binary_path.resolve()
+    if not binary_path.exists():
+        raise FileNotFoundError(
+            f"cog binary not found: {binary_path}. "
+            "Run 'cargo build --release' in the cog repository."
+        )
+
+    # Inject/append the system prompt into the agent config
+    existing = agent_data.get("append_system_prompt", "")
+    if existing:
+        agent_data["append_system_prompt"] = f"{existing}\n\n{COG_SYSTEM_PROMPT}"
+    else:
+        agent_data["append_system_prompt"] = COG_SYSTEM_PROMPT
+
+    # Bind-mount the prebuilt binary into the container
+    env_data.setdefault("docker", {})
+    env_data["docker"].setdefault("extra_mounts", {})
+    env_data["docker"]["extra_mounts"][str(binary_path)] = "/usr/local/bin/cog"
+
+    # Make sure baseline and cog runs never share an output directory
+    if "_cog" not in save_template_raw and "_nocog" not in save_template_raw:
+        if "${now:" in save_template_raw:
+            save_template_raw = save_template_raw.replace(
+                "${now:", "_cog_${now:"
+            )
+        else:
+            save_template_raw = f"{save_template_raw}_cog"
+
+    return agent_data, env_data, save_template_raw
 
 def get_package_config_dir() -> Path:
     """Get the package's configs directory.
@@ -519,6 +612,17 @@ def load_run_config(
         "save_template",
         "${model.name}/${agent.type}-${agent.version}_${prompt}_${thinking}_${now:%Y%m%dT%H%M}",
     )
+
+    # 14b. Apply cog integration when enabled
+    cog = _coerce_cog_config(cfg_dict.get("cog", {}))
+    if cog.enabled:
+        agent_data, env_data, save_template_raw = _apply_cog_integration(
+            cog=cog,
+            agent_data=agent_data,
+            env_data=env_data,
+            save_template_raw=save_template_raw,
+        )
+
     save_template = _resolve_save_template(save_template_raw, context)
 
     # Combine root and template, handling empty root case
@@ -539,6 +643,7 @@ def load_run_config(
         output_path=output_path,
         problems=len(problems),
         one_shot=one_shot.enabled,
+        cog=cog.enabled,
     )
 
     return ResolvedRunConfig(
@@ -557,6 +662,7 @@ def load_run_config(
         save_template=save_template,
         output_path=output_path,
         one_shot=one_shot,
+        cog=cog,
     )
 
 
