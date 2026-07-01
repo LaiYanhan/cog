@@ -1,0 +1,53 @@
+agent: ./configs/agents/claude_code_deepseek.yaml
+environment: docker-python3.12-uv
+prompt: just-solve
+
+model:
+  provider: deepseek
+  name: deepseek-v4-flash
+
+thinking: high
+pass_policy: all-cases
+
+# Full benchmark: all 36 problems, 196 checkpoints.
+# This is the final reported set; it should only be run after dev/val/test tuning is done.
+problems:
+  - cfgpipe
+  - circuit_eval
+  - code_search
+  - dag_execution
+  - database_migration
+  - datagate
+  - dynamic_buffer
+  - dynamic_config_service_api
+  - env_manager
+  - etl_pipeline
+  - eve_industry
+  - eve_jump_planner
+  - eve_market_tools
+  - eve_route_planner
+  - execution_server
+  - file_backup
+  - file_merger
+  - file_query_tool
+  - forge
+  - l2m
+  - layered_config_synthesizer
+  - log_query
+  - meshctl
+  - metric_transform_lang
+  - migrate_configs
+  - mocked_http
+  - mvvault
+  - pwd_manager
+  - recli
+  - rejector
+  - sheeteval
+  - sith
+  - test_translator
+  - textdrop
+  - trajectory_api
+  - xjq
+
+save_dir: outputs
+save_template: ${model.provider}/${agent.type}-${agent.version}_${prompt}_${now:%Y%m%dT%H%M}

@@ -1,0 +1,27 @@
+agent: ./configs/agents/claude_code_deepseek.yaml
+environment: docker-python3.12-uv
+prompt: just-solve
+
+model:
+  provider: deepseek
+  name: deepseek-v4-flash
+
+thinking: high
+pass_policy: all-cases
+
+# Medium-scale test set: 10 problems, 51 checkpoints, 4 Easy / 4 Medium / 2 Hard
+# Disjoint from smoke, dev, and val. Used as a final pre-full checkpoint.
+problems:
+  - datagate
+  - etl_pipeline
+  - execution_server
+  - l2m
+  - file_query_tool
+  - log_query
+  - layered_config_synthesizer
+  - eve_industry
+  - eve_route_planner
+  - rejector
+
+save_dir: outputs
+save_template: ${model.provider}/${agent.type}-${agent.version}_${prompt}_${now:%Y%m%dT%H%M}

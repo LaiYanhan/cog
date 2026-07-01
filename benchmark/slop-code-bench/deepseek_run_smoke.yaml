@@ -1,0 +1,17 @@
+agent: ./configs/agents/claude_code_deepseek.yaml
+environment: docker-python3.12-uv
+prompt: just-solve
+
+model:
+  provider: deepseek
+  name: deepseek-v4-flash
+
+thinking: high
+pass_policy: all-cases
+
+# Smoke test: 1 problem, 4 checkpoints, Easy
+problems:
+  - file_backup
+
+save_dir: outputs
+save_template: ${model.provider}/${agent.type}-${agent.version}_${prompt}_${now:%Y%m%dT%H%M}

@@ -1,0 +1,22 @@
+agent: ./configs/agents/claude_code_deepseek.yaml
+environment: docker-python3.12-uv
+prompt: just-solve
+
+model:
+  provider: deepseek
+  name: deepseek-v4-flash
+
+thinking: high
+pass_policy: all-cases
+
+# Validation set: 5 problems, 21 checkpoints, 2 Easy / 2 Medium / 1 Hard
+# Must be kept unseen during development to avoid overfitting.
+problems:
+  - env_manager
+  - xjq
+  - eve_jump_planner
+  - dynamic_config_service_api
+  - dynamic_buffer
+
+save_dir: outputs
+save_template: ${model.provider}/${agent.type}-${agent.version}_${prompt}_${now:%Y%m%dT%H%M}

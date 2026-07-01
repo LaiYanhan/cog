@@ -1,0 +1,12 @@
+internal_name: deepseek-v4-pro
+provider: deepseek
+pricing:
+  input: 0.435
+  output: 0.87
+  cache_read: 0.003625
+  cache_write: 0
+aliases:
+  - deepseek/deepseek-v4-pro
+provider_slugs:
+  deepseek: deepseek-v4-pro
+  openrouter: deepseek/deepseek-v4-pro
