@@ -25,41 +25,35 @@ from slop_code.logging import get_logger
 logger = get_logger(__name__)
 
 
-COG_SYSTEM_PROMPT = """## Cognitive Model Tool: `cog`
+COG_SYSTEM_PROMPT = """## Required cognitive tool: `cog`
 
-A persistent cognitive model of the codebase is available via the `cog` CLI
-(installed at /usr/local/bin/cog, data in .cog/cog.db). It records what you
-know about the code — contracts, invariants, fragilities, design intent — so
-you do not have to re-derive that understanding from scratch each time,
-especially as the specification evolves across checkpoints.
+You have access to `cog` at `/usr/local/bin/cog`. It is a persistent cognitive model of the codebase, stored in `.cog/cog.db`. You are required to use it to record and reason about the code you are working on, especially across checkpoints.
 
-### When and how to use it
+What `cog` records:
+- `contract`: what a piece of code promises to callers
+- `intent`: why a non-obvious design choice was made
+- `invariant`: a property that must always hold, or a bug results
+- `fragility`: a known risk or trap that is not visible in the code
+- `correction`: a mistake that was made and how it was fixed
 
-- **First checkpoint**: run `cog sync --init` in the workspace root to build
-  the structural model, then `cog index` to survey what exists.
-- **Before writing or changing code**: `cog query <entity>` to recall what is
-  already known, and `cog impact <entity>` to check blast radius.
-- **When you learn something non-obvious** (a contract, a constraint, a risk,
-  a design decision): record it so a future checkpoint benefits:
-  `cog assert <entity> --kind contract|invariant|fragility|intent --claim "<one sentence>" --grounds "code:<entity>"`
-- **When a prior assumption is invalidated** by a spec change or a failed
-  attempt: `cog retract <id> --reason "<why>"` (it cascades to dependents).
-- **Unsure what to do next**: `cog next` — it reads the workflow state and
-  suggests the next action.
+Your workflow on every checkpoint:
 
-### Guidelines
+1. BUILD: `cog sync --init` (first time) or `cog sync` (refresh). Then `cog index --uncovered` to see what lacks knowledge.
+2. ENRICH: Before changing code, run `cog query <entity>` and `cog impact <entity>` on the entities you plan to touch. Record what you learn with `cog assert <entity> --kind <kind> --claim "<one sentence>" --grounds "code:<entity>"`.
+3. REASON: For changes that affect multiple entities or public interfaces, run `cog experiment try <entity> --kind <kind> --claim "<plan>" --grounds "plan:<desc>" --desc "<desc>"`. Evaluate the risk before editing code.
+4. DESCEND: After editing, run `cog sync` and `cog verify --scan`. Record corrections with `cog assert --kind correction` and retract stale claims with `cog retract <id> --reason "<why>"`.
 
-- Record the WHY (promises, risks, intent, corrections), not what the code
-  obviously does. Restating obvious behaviour wastes tokens.
-- Keep assertions to one crisp sentence each. Use `--grounds code:<entity>`
-  to tie them to evidence.
-- Entity names are `::`-qualified (e.g. `backup_scheduler::parse_schedule`).
-  Uppercase last segment = Type, contains `::` = Function, else Module.
-- Run `cog sync` after meaningful code changes to refresh the model, then
-  `cog verify` to check consistency.
+When you are unsure what to do next, run `cog next`. It reads the workflow state and tells you whether to survey, enrich, reason, or descend.
 
-`cog` is a tool to make your work across checkpoints more coherent. Use it
-when it helps; do not let it replace actually reading and testing the code."""
+Rules:
+- Record WHY, not WHAT. The code already states what it does.
+- One assertion per sentence.
+- Entity names are `::-qualified` (e.g. `backup_scheduler::parse_schedule`).
+- Ground assertions with `code:<entity>` or `test:<path>` when possible.
+- Never delete or reset `.cog/cog.db`.
+- `cog` does not capture runtime behavior; always verify with tests.
+- Do not over-model trivial code. Ask: "If this assumption changed, would it cause a hard-to-find bug?"
+- Do not use `cog` to avoid reading code or running tests."""
 
 
 def _quote_for_shell(value: str) -> str:
@@ -560,6 +554,18 @@ def load_run_config(
             "Applied agent config overrides",
             overrides=agent_overrides,
         )
+
+    # 7b. Resolve cog config early so it can influence prompt selection
+    cog = _coerce_cog_config(cfg_dict.get("cog", {}))
+    if cog.enabled:
+        # Switch the prompt template to one that embeds the cog workflow
+        # directly into the task. The system prompt alone is too easy to
+        # ignore when the task prompt says "just solve the spec".
+        prompt_name = cfg_dict.get("prompt", "just-solve")
+        if prompt_name == "just-solve":
+            cfg_dict["prompt"] = "cog-guided"
+            logger.debug("Switched prompt to cog-guided", cog=cog.enabled)
+
     env_path, env_data = _resolve_environment_config(cfg_dict["environment"])
     prompt_path, prompt_content = _resolve_prompt(cfg_dict["prompt"])
 
@@ -623,7 +629,6 @@ def load_run_config(
     )
 
     # 14b. Apply cog integration when enabled
-    cog = _coerce_cog_config(cfg_dict.get("cog", {}))
     if cog.enabled:
         agent_data, env_data, save_template_raw = _apply_cog_integration(
             cog=cog,

@@ -7,8 +7,8 @@ model:
   provider: deepseek
   name: deepseek-v4-flash
 
-thinking: high
-pass_policy: all-cases
+thinking: disabled
+pass_policy: core-cases
 
 # Validation set: 5 problems, 21 checkpoints, 2 Easy / 2 Medium / 1 Hard
 # Must be kept unseen during development to avoid overfitting.

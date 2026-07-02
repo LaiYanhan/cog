@@ -1,0 +1,32 @@
+Implement a program that 100% solves the specification.
+
+You MUST use the `cog` cognitive model CLI at `/usr/local/bin/cog` throughout this task. `cog` maintains a persistent model of the codebase in `.cog/cog.db`. Use it to record what you learn so you do not rebuild your understanding from scratch each time the specification changes.
+
+{% if not is_continuation -%}
+This is the first checkpoint. Follow this exact order:
+1. `cog sync --init` to create `.cog/cog.db`.
+2. `cog index --uncovered` to see what exists without knowledge.
+3. Before writing any code, run `cog query <entity>` and `cog impact <entity>` on the entities you plan to touch.
+4. As you learn non-obvious contracts, risks, or design decisions, record them with `cog assert <entity> --kind <contract|intent|invariant|fragility|correction> --claim "<one sentence>" --grounds "code:<entity>"`.
+5. Use a virtual environment and ensure a `requirements.txt` is present with any dependencies you need.
+{% else -%}
+This checkpoint extends prior work. The cognitive model in `.cog/cog.db` already exists. Follow this exact order:
+1. `cog sync` to refresh the model.
+2. `cog query <entity>` and `cog impact <entity>` the entities you will modify before editing.
+3. Update or retract stale assertions with `cog retract <id> --reason "<why>"` when prior assumptions are invalidated.
+4. Run `cog sync` and `cog verify --scan` after changes.
+5. Keep using the same virtual environment; update `requirements.txt` with any new dependencies.
+{% endif -%}
+
+Rules for `cog`:
+- Record WHY, not WHAT. The code already states what it does.
+- One assertion per sentence.
+- Entity names are `::-qualified` (e.g. `backup_scheduler::parse_schedule`).
+- Ground assertions with `code:<entity>` or `test:<path>` when possible.
+- Never delete or reset `.cog/cog.db`.
+- `cog` does not capture runtime behavior; always verify with tests.
+- When stuck, run `cog next`.
+- Do not use `cog` to avoid reading code or running tests.
+
+Your task is:
+{{ spec.strip() }}

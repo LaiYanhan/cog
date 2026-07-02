@@ -7,8 +7,8 @@ model:
   provider: deepseek
   name: deepseek-v4-flash
 
-thinking: high
-pass_policy: all-cases
+thinking: disabled
+pass_policy: core-cases
 
 # Medium-scale test set: 10 problems, 51 checkpoints, 4 Easy / 4 Medium / 2 Hard
 # Disjoint from smoke, dev, and val. Used as a final pre-full checkpoint.

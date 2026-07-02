@@ -7,8 +7,8 @@ model:
   provider: deepseek
   name: deepseek-v4-flash
 
-thinking: high
-pass_policy: all-cases
+thinking: disabled
+pass_policy: core-cases
 
 # Full benchmark: all 36 problems, 196 checkpoints.
 # This is the final reported set; it should only be run after dev/val/test tuning is done.

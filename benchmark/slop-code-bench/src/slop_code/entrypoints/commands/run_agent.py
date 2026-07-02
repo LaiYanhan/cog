@@ -364,10 +364,9 @@ def _resolve_environment_and_credentials(
     Raises:
         typer.Exit: If model not found in catalog or credentials unavailable
     """
-    # Resolve environment spec from loaded config
-    env_spec = config_loader.resolve_environment(
-        run_cfg.environment_config_path or run_cfg.environment
-    )
+    # Resolve environment spec from loaded config (use the loaded dict so
+    # loader-applied modifications like cog extra_mounts are preserved).
+    env_spec = config_loader.resolve_environment(run_cfg.environment)
     env_spec_typed = cast("EnvironmentSpecType", env_spec)
 
     # Look up ModelDefinition from catalog
